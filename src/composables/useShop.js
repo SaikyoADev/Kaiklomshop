@@ -1,0 +1,366 @@
+import { reactive, computed } from "vue";
+
+// Singleton reactive state shared across every component (like a tiny store).
+const state = reactive({
+  token: localStorage.getItem("shopToken") || "",
+  me: null,
+  products: [],
+  categories: [],
+  activeCategory: "ทั้งหมด",
+  bank: null,
+  view: "home",
+  authTab: "login",
+  toastMessage: "",
+  toastTimer: null,
+  loginForm: { username: "", password: "" },
+  registerForm: { name: "", username: "", password: "" },
+  topupForm: { amount: "", slipRef: "", transferAt: "" },
+  productForm: { title: "", game: "Roblox", category: "Roblox ID", price: "", image: "", description: "" },
+  stockForm: { productId: "", rows: "" },
+  topups: [],
+  orders: [],
+  visibleSecrets: {},
+  admin: { users: [], products: [], topups: [], orders: [], stats: {} },
+});
+
+const isAdmin = computed(() => state.me?.role === "admin");
+const categoryFilters = computed(() => ["ทั้งหมด", ...state.categories]);
+const filteredProducts = computed(() => {
+  if (state.activeCategory === "ทั้งหมด") return state.products;
+  return state.products.filter((product) => product.category === state.activeCategory);
+});
+
+function baht(amount) {
+  return `${new Intl.NumberFormat("th-TH", { maximumFractionDigits: 0 }).format(Number(amount || 0))} พอยต์`;
+}
+
+function dateText(value) {
+  if (!value) return "-";
+  return new Intl.DateTimeFormat("th-TH", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+function toast(message) {
+  state.toastMessage = message;
+  clearTimeout(state.toastTimer);
+  state.toastTimer = setTimeout(() => {
+    state.toastMessage = "";
+  }, 3200);
+}
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const data = await response.json();
+  if (!response.ok || data.ok === false) {
+    throw new Error(data.message || "เกิดข้อผิดพลาด");
+  }
+  return data;
+}
+
+async function loadBootstrap() {
+  try {
+    const data = await api("/api/bootstrap");
+    state.me = data.me;
+    state.products = data.products;
+    state.categories = data.categories;
+    state.bank = data.bank;
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function loadTopups() {
+  if (!state.me) {
+    state.topups = [];
+    return;
+  }
+  try {
+    const data = await api("/api/topups");
+    state.topups = data.topups;
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function loadOrders() {
+  if (!state.me) {
+    state.orders = [];
+    return;
+  }
+  try {
+    const data = await api("/api/orders");
+    state.orders = data.orders;
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function loadAdmin() {
+  if (!isAdmin.value) return;
+  try {
+    const data = await api("/api/admin");
+    state.admin = {
+      ...data,
+      users: data.users.map((user) => ({ ...user, pointInput: "" })),
+      products: data.products.map((product) => ({ ...product })),
+      topups: data.topups.map((topup) => ({ ...topup, lineInput: "" })),
+    };
+    if (!state.stockForm.productId && state.admin.products[0]) {
+      state.stockForm.productId = state.admin.products[0].id;
+    }
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function setView(view) {
+  state.view = view;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  if (view === "topup") await loadTopups();
+  if (view === "orders") await loadOrders();
+  if (view === "admin") await loadAdmin();
+}
+
+function requireLogin(openAuthFn) {
+  if (state.me) return true;
+  openAuthFn("login");
+  toast("กรุณาเข้าสู่ระบบก่อนใช้งาน");
+  return false;
+}
+
+async function login() {
+  try {
+    const data = await api("/api/login", { method: "POST", body: JSON.stringify(state.loginForm) });
+    state.token = data.token;
+    state.me = data.user;
+    localStorage.setItem("shopToken", state.token);
+    toast("เข้าสู่ระบบสำเร็จ");
+    return true;
+  } catch (error) {
+    toast(error.message);
+    return false;
+  }
+}
+
+async function register() {
+  try {
+    const data = await api("/api/register", { method: "POST", body: JSON.stringify(state.registerForm) });
+    state.token = data.token;
+    state.me = data.user;
+    localStorage.setItem("shopToken", state.token);
+    toast("สมัครสมาชิกสำเร็จ");
+    return true;
+  } catch (error) {
+    toast(error.message);
+    return false;
+  }
+}
+
+function logout() {
+  state.token = "";
+  state.me = null;
+  state.admin = { users: [], products: [], topups: [], orders: [], stats: {} };
+  localStorage.removeItem("shopToken");
+  setView("home");
+  toast("ออกจากระบบแล้ว");
+}
+
+async function buyProduct(product, openAuthFn) {
+  if (!requireLogin(openAuthFn)) return;
+  const ok = confirm(`ยืนยันซื้อ "${product.title}" ราคา ${baht(product.price)} ใช่หรือไม่`);
+  if (!ok) return;
+  try {
+    const data = await api("/api/purchase", { method: "POST", body: JSON.stringify({ productId: product.id }) });
+    state.me = data.user;
+    await loadBootstrap();
+    toast("ซื้อสำเร็จ ดูรหัสได้ในประวัติการซื้อ");
+    await setView("orders");
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function createTopup(openAuthFn) {
+  if (!requireLogin(openAuthFn)) return;
+  try {
+    await api("/api/topups", { method: "POST", body: JSON.stringify(state.topupForm) });
+    state.topupForm = { amount: "", slipRef: "", transferAt: "" };
+    toast("ส่งรายการเติมเงินแล้ว รอแอดมินตรวจสอบ");
+    await loadTopups();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+function toggleSecret(orderId) {
+  state.visibleSecrets[orderId] = !state.visibleSecrets[orderId];
+}
+
+async function createProduct() {
+  try {
+    await api("/api/admin/products", { method: "POST", body: JSON.stringify(state.productForm) });
+    state.productForm = { title: "", game: "Roblox", category: "Roblox ID", price: "", image: "", description: "" };
+    toast("เพิ่มสินค้าแล้ว");
+    await loadBootstrap();
+    await loadAdmin();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function updateProduct(product) {
+  if (!product.title || Number(product.price) <= 0) {
+    toast("กรุณากรอกชื่อสินค้าและราคามากกว่า 0");
+    return;
+  }
+  try {
+    await api(`/api/admin/products/${product.id}`, { method: "PATCH", body: JSON.stringify(product) });
+    toast("บันทึกการแก้ไขสินค้าแล้ว");
+    await loadBootstrap();
+    await loadAdmin();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function deleteProduct(product) {
+  const ok = confirm(`ต้องการลบสินค้า "${product.title}" ใช่หรือไม่`);
+  if (!ok) return;
+  try {
+    await api(`/api/admin/products/${product.id}`, { method: "DELETE" });
+    toast("ลบสินค้าแล้ว");
+    await loadBootstrap();
+    await loadAdmin();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function addStock() {
+  if (!state.stockForm.productId) {
+    toast("กรุณาเลือกสินค้า");
+    return;
+  }
+  try {
+    await api(`/api/admin/products/${state.stockForm.productId}/stock`, {
+      method: "POST",
+      body: JSON.stringify({ rows: state.stockForm.rows }),
+    });
+    state.stockForm.rows = "";
+    toast("เพิ่มสต็อกสำเร็จ");
+    await loadBootstrap();
+    await loadAdmin();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function reviewTopup(topup, status) {
+  try {
+    await api(`/api/admin/topups/${topup.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        status,
+        lineRef: topup.lineInput || "",
+        note: status === "approved" ? "ยอดตรงกับ LINE Krungthai" : "ยอดไม่ตรงหรือไม่พบเงินเข้า",
+      }),
+    });
+    toast(status === "approved" ? "อนุมัติและเพิ่มพอยต์แล้ว" : "ปฏิเสธรายการแล้ว");
+    await loadBootstrap();
+    await loadAdmin();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function hideTopup(topupId) {
+  try {
+    await api(`/api/admin/topups/${topupId}`, { method: "PATCH", body: JSON.stringify({ hidden: true }) });
+    toast("ซ่อนรายการเติมเงินแล้ว");
+    await loadAdmin();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function hideReviewedTopups() {
+  try {
+    const data = await api("/api/admin/topups/hide-reviewed", { method: "POST", body: JSON.stringify({}) });
+    toast(`ซ่อนรายการที่ตรวจแล้ว ${data.hidden || 0} รายการ`);
+    await loadAdmin();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function addPointsToUser(user) {
+  const amount = Number(user.pointInput || 0);
+  if (!amount || amount <= 0) {
+    toast("กรุณากรอกจำนวนพอยต์ที่ต้องการเพิ่ม");
+    return;
+  }
+  try {
+    await api(`/api/admin/users/${user.id}/points`, {
+      method: "POST",
+      body: JSON.stringify({ amount, note: "เพิ่มพอยต์โดยตรงจากหลังบ้าน" }),
+    });
+    toast("เพิ่มพอยต์ให้สมาชิกแล้ว");
+    await loadBootstrap();
+    await loadAdmin();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function deleteUser(user) {
+  const ok = confirm(`ต้องการลบสมาชิก ${user.username} ใช่หรือไม่`);
+  if (!ok) return;
+  try {
+    await api(`/api/admin/users/${user.id}`, { method: "DELETE" });
+    toast("ลบสมาชิกแล้ว");
+    await loadBootstrap();
+    await loadAdmin();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+// Single entry point every component imports.
+export function useShop() {
+  return {
+    state,
+    isAdmin,
+    categoryFilters,
+    filteredProducts,
+    baht,
+    dateText,
+    toast,
+    loadBootstrap,
+    loadTopups,
+    loadOrders,
+    loadAdmin,
+    setView,
+    requireLogin,
+    login,
+    register,
+    logout,
+    buyProduct,
+    createTopup,
+    toggleSecret,
+    createProduct,
+    updateProduct,
+    deleteProduct,
+    addStock,
+    reviewTopup,
+    hideTopup,
+    hideReviewedTopups,
+    addPointsToUser,
+    deleteUser,
+  };
+}
