@@ -5,6 +5,12 @@ import crypto from "node:crypto";
 // Generate one with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 const keyHex = process.env.CREDENTIAL_KEY;
 
+// Temporary diagnostic log — safe to leave in, never prints the actual key value.
+console.log(
+  `[crypto.js] NODE_ENV=${process.env.NODE_ENV || "(not set)"} | ` +
+  `CREDENTIAL_KEY present=${Boolean(keyHex)} | length=${keyHex ? keyHex.length : 0}`
+);
+
 if (!keyHex && process.env.NODE_ENV === "production") {
   throw new Error(
     "CREDENTIAL_KEY environment variable is required in production. " +
