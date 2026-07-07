@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express from "express";
+import helmet from "helmet";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -101,6 +102,37 @@ function parseStockRows(text) {
 }
 
 const app = express();
+
+// Security headers (HSTS, CSP, X-Frame-Options, X-Content-Type-Options, etc.)
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "https:"],
+        connectSrc: ["'self'"],
+        fontSrc: ["'self'", "data:"],
+        objectSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+      },
+    },
+    hsts: { maxAge: 31536000, includeSubDomains: true },
+  })
+);
+
+// Explicitly 404 well-known sensitive paths instead of falling through to the SPA index.html.
+// (Without this, security scanners see HTTP 200 on /.env etc. and flag it, even though the
+// real files are never actually served — this just makes that unambiguous.)
+const blockedPathPattern = /(^|\/)(\.env|\.git(\/|$)|\.htaccess|\.ds_store|wp-config\.php|config\.php\.bak|phpinfo\.php|server-status|backup\.zip)/i;
+app.use((req, res, next) => {
+  if (blockedPathPattern.test(req.path)) {
+    return res.status(404).type("text/plain").send("Not found");
+  }
+  next();
+});
+
 app.use(express.json({ limit: "1mb" }));
 
 const api = express.Router();
