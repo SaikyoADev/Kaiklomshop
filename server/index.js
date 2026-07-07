@@ -17,6 +17,12 @@ const sessions = new Map();
 function now() {
   return new Date().toISOString().slice(0, 19).replace("T", " ");
 }
+function toMysqlDateLocal(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString().slice(0, 19).replace("T", " ");
+}
 function id(prefix) {
   return `${prefix}_${crypto.randomBytes(8).toString("hex")}`;
 }
@@ -115,7 +121,7 @@ api.get("/bootstrap", async (req, res) => {
     bank: {
       name: "ธนาคารกรุงไทย",
       accountName: "นายณัฐวุฒิ นิลทะราช",
-      accountNo: "660-6-15573-8",
+      accountNo: "กรอกเลขบัญชีของคุณที่นี่ (server/index.js)",
       lineNote: "เมื่อมีเงินเข้า ให้เจ้าของร้านดูแจ้งเตือน LINE Krungthai แล้วนำเลขอ้างอิงมากดยืนยันในหลังบ้าน",
     },
   });
@@ -457,6 +463,118 @@ api.delete("/admin/users/:id", async (req, res) => {
     if (session.userId === user.id) sessions.delete(token);
   }
   res.json({ ok: true, deletedUserId: user.id });
+});
+
+// ---- Redeem codes ----
+
+function generateCode() {
+  // Human-friendly code like KAIKLOM-XXXX-XXXX
+  const part = () => crypto.randomBytes(3).toString("hex").toUpperCase();
+  return `KAIKLOM-${part()}-${part()}`;
+}
+
+api.post("/redeem", async (req, res) => {
+  const user = await requireUser(req, res);
+  if (!user) return;
+  const code = String(req.body.code || "").trim().toUpperCase();
+  if (!code) return res.status(400).json({ ok: false, message: "กรุณากรอกโค้ด" });
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [rows] = await conn.query("SELECT * FROM redeem_codes WHERE code = ? FOR UPDATE", [code]);
+    const redeemCode = rows[0];
+    if (!redeemCode || !redeemCode.active) {
+      await conn.rollback();
+      return res.status(404).json({ ok: false, message: "ไม่พบโค้ดนี้ หรือโค้ดถูกปิดใช้งานแล้ว" });
+    }
+    if (redeemCode.expiresAt && new Date(redeemCode.expiresAt) < new Date()) {
+      await conn.rollback();
+      return res.status(400).json({ ok: false, message: "โค้ดนี้หมดอายุแล้ว" });
+    }
+    if (redeemCode.usedCount >= redeemCode.maxUses) {
+      await conn.rollback();
+      return res.status(400).json({ ok: false, message: "โค้ดนี้ถูกใช้ครบจำนวนแล้ว" });
+    }
+
+    const [existingUse] = await conn.query(
+      "SELECT id FROM redeem_code_uses WHERE codeId = ? AND userId = ?",
+      [redeemCode.id, user.id]
+    );
+    if (existingUse.length) {
+      await conn.rollback();
+      return res.status(400).json({ ok: false, message: "คุณใช้โค้ดนี้ไปแล้ว" });
+    }
+
+    await conn.query("UPDATE redeem_codes SET usedCount = usedCount + 1 WHERE id = ?", [redeemCode.id]);
+    await conn.query("INSERT INTO redeem_code_uses (id, codeId, userId, usedAt) VALUES (?,?,?,?)", [
+      id("redeemuse"), redeemCode.id, user.id, now(),
+    ]);
+    await conn.query("UPDATE users SET points = points + ? WHERE id = ?", [redeemCode.points, user.id]);
+
+    await conn.commit();
+
+    const freshUser = await getUserById(user.id);
+    res.json({ ok: true, pointsAdded: redeemCode.points, user: publicUser(freshUser) });
+  } catch (error) {
+    await conn.rollback();
+    console.error(error);
+    res.status(500).json({ ok: false, message: "เกิดข้อผิดพลาด กรุณาลองใหม่" });
+  } finally {
+    conn.release();
+  }
+});
+
+api.get("/admin/codes", async (req, res) => {
+  const admin = await requireAdmin(req, res);
+  if (!admin) return;
+  const [rows] = await pool.query("SELECT * FROM redeem_codes ORDER BY createdAt DESC");
+  res.json({ ok: true, codes: rows.map((c) => ({ ...c, points: Number(c.points) })) });
+});
+
+api.post("/admin/codes", async (req, res) => {
+  const admin = await requireAdmin(req, res);
+  if (!admin) return;
+  const points = Math.round(Number(req.body.points || 0));
+  const maxUses = Math.max(1, Math.round(Number(req.body.maxUses || 1)));
+  const expiresAt = req.body.expiresAt ? toMysqlDateLocal(req.body.expiresAt) : null;
+  const customCode = String(req.body.code || "").trim().toUpperCase();
+
+  if (!points || points <= 0) return res.status(400).json({ ok: false, message: "กรุณากรอกจำนวนพอยต์มากกว่า 0" });
+
+  const code = customCode || generateCode();
+  const codeRow = { id: id("code"), code, points, maxUses, createdAt: now(), createdBy: admin.id };
+
+  try {
+    await pool.query(
+      "INSERT INTO redeem_codes (id, code, points, maxUses, expiresAt, createdAt, createdBy) VALUES (?,?,?,?,?,?,?)",
+      [codeRow.id, codeRow.code, codeRow.points, codeRow.maxUses, expiresAt, codeRow.createdAt, codeRow.createdBy]
+    );
+  } catch (error) {
+    if (error.code === "ER_DUP_ENTRY") return res.status(400).json({ ok: false, message: "โค้ดนี้มีอยู่แล้ว กรุณาใช้ชื่ออื่น" });
+    throw error;
+  }
+
+  res.status(201).json({ ok: true, code: { ...codeRow, usedCount: 0, active: 1, expiresAt } });
+});
+
+api.patch("/admin/codes/:id", async (req, res) => {
+  const admin = await requireAdmin(req, res);
+  if (!admin) return;
+  const [rows] = await pool.query("SELECT * FROM redeem_codes WHERE id = ?", [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ ok: false, message: "ไม่พบโค้ดนี้" });
+  const active = req.body.active === false ? 0 : 1;
+  await pool.query("UPDATE redeem_codes SET active = ? WHERE id = ?", [active, req.params.id]);
+  res.json({ ok: true });
+});
+
+api.delete("/admin/codes/:id", async (req, res) => {
+  const admin = await requireAdmin(req, res);
+  if (!admin) return;
+  await pool.query("DELETE FROM redeem_code_uses WHERE codeId = ?", [req.params.id]);
+  await pool.query("DELETE FROM redeem_codes WHERE id = ?", [req.params.id]);
+  res.json({ ok: true });
 });
 
 app.use("/api", api);

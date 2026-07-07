@@ -21,6 +21,18 @@ const state = reactive({
   orders: [],
   visibleSecrets: {},
   admin: { users: [], products: [], topups: [], orders: [], stats: {} },
+  redeemForm: { code: "" },
+  adminCodeForm: { code: "", points: "", maxUses: 1, expiresAt: "" },
+  adminCodes: [],
+  adminPanelOpen: {
+    stats: true,
+    addProduct: false,
+    addStock: false,
+    codes: false,
+    topups: false,
+    products: false,
+    users: false,
+  },
 });
 
 const isAdmin = computed(() => state.me?.role === "admin");
@@ -124,7 +136,10 @@ async function setView(view) {
   window.scrollTo({ top: 0, behavior: "smooth" });
   if (view === "topup") await loadTopups();
   if (view === "orders") await loadOrders();
-  if (view === "admin") await loadAdmin();
+  if (view === "admin") {
+    await loadAdmin();
+    await loadAdminCodes();
+  }
 }
 
 function requireLogin(openAuthFn) {
@@ -331,6 +346,86 @@ async function deleteUser(user) {
   }
 }
 
+async function redeemCode() {
+  if (!state.me) {
+    toast("กรุณาเข้าสู่ระบบก่อนใช้งาน");
+    return;
+  }
+  const code = state.redeemForm.code.trim();
+  if (!code) {
+    toast("กรุณากรอกโค้ด");
+    return;
+  }
+  try {
+    const data = await api("/api/redeem", { method: "POST", body: JSON.stringify({ code }) });
+    state.me = data.user;
+    state.redeemForm.code = "";
+    toast(`รับ ${baht(data.pointsAdded)} สำเร็จ!`);
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function loadAdminCodes() {
+  if (!isAdmin.value) return;
+  try {
+    const data = await api("/api/admin/codes");
+    state.adminCodes = data.codes;
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function createAdminCode() {
+  const points = Number(state.adminCodeForm.points || 0);
+  if (!points || points <= 0) {
+    toast("กรุณากรอกจำนวนพอยต์มากกว่า 0");
+    return;
+  }
+  try {
+    await api("/api/admin/codes", {
+      method: "POST",
+      body: JSON.stringify({
+        code: state.adminCodeForm.code,
+        points,
+        maxUses: state.adminCodeForm.maxUses || 1,
+        expiresAt: state.adminCodeForm.expiresAt || null,
+      }),
+    });
+    state.adminCodeForm = { code: "", points: "", maxUses: 1, expiresAt: "" };
+    toast("สร้างโค้ดสำเร็จ");
+    await loadAdminCodes();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function toggleAdminCode(code) {
+  try {
+    await api(`/api/admin/codes/${code.id}`, { method: "PATCH", body: JSON.stringify({ active: !code.active }) });
+    toast(code.active ? "ปิดใช้งานโค้ดแล้ว" : "เปิดใช้งานโค้ดแล้ว");
+    await loadAdminCodes();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function deleteAdminCode(code) {
+  const ok = confirm(`ต้องการลบโค้ด "${code.code}" ใช่หรือไม่`);
+  if (!ok) return;
+  try {
+    await api(`/api/admin/codes/${code.id}`, { method: "DELETE" });
+    toast("ลบโค้ดแล้ว");
+    await loadAdminCodes();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+function togglePanel(key) {
+  state.adminPanelOpen[key] = !state.adminPanelOpen[key];
+}
+
 // Single entry point every component imports.
 export function useShop() {
   return {
@@ -362,5 +457,11 @@ export function useShop() {
     hideReviewedTopups,
     addPointsToUser,
     deleteUser,
+    redeemCode,
+    loadAdminCodes,
+    createAdminCode,
+    toggleAdminCode,
+    deleteAdminCode,
+    togglePanel,
   };
 }

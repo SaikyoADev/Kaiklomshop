@@ -14,6 +14,7 @@
       <button class="ghost" :class="{ active: shop.state.view === 'home' }" @click="shop.setView('home')">หน้าร้าน</button>
       <button class="ghost" :class="{ active: shop.state.view === 'topup' }" @click="shop.setView('topup')">เติมพอยต์</button>
       <button class="ghost" :class="{ active: shop.state.view === 'orders' }" @click="shop.setView('orders')">ประวัติการซื้อ</button>
+      <button v-if="shop.state.me" class="ghost" :class="{ active: shop.state.view === 'profile' }" @click="shop.setView('profile')">โปรไฟล์</button>
       <button v-if="shop.isAdmin.value" class="ghost" :class="{ active: shop.state.view === 'admin' }" @click="shop.setView('admin')">หลังบ้าน</button>
     </nav>
 

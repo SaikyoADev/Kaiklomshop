@@ -98,6 +98,31 @@ async function createSchema() {
         INDEX idx_orders_user (userId)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS redeem_codes (
+        id VARCHAR(64) PRIMARY KEY,
+        code VARCHAR(64) UNIQUE NOT NULL,
+        points INT NOT NULL,
+        maxUses INT NOT NULL DEFAULT 1,
+        usedCount INT NOT NULL DEFAULT 0,
+        active TINYINT(1) NOT NULL DEFAULT 1,
+        expiresAt DATETIME NULL,
+        createdAt DATETIME NOT NULL,
+        createdBy VARCHAR(64)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS redeem_code_uses (
+        id VARCHAR(64) PRIMARY KEY,
+        codeId VARCHAR(64) NOT NULL,
+        userId VARCHAR(64) NOT NULL,
+        usedAt DATETIME NOT NULL,
+        UNIQUE KEY uniq_code_user (codeId, userId),
+        INDEX idx_redeem_uses_code (codeId)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
   } finally {
     conn.release();
   }
