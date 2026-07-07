@@ -121,7 +121,7 @@ api.get("/bootstrap", async (req, res) => {
     bank: {
       name: "ธนาคารกรุงไทย",
       accountName: "นายณัฐวุฒิ นิลทะราช",
-      accountNo: "กรอกเลขบัญชีของคุณที่นี่ (server/index.js)",
+      accountNo: "660-6-15573-8",
       lineNote: "เมื่อมีเงินเข้า ให้เจ้าของร้านดูแจ้งเตือน LINE Krungthai แล้วนำเลขอ้างอิงมากดยืนยันในหลังบ้าน",
     },
   });
