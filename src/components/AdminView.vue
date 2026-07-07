@@ -23,6 +23,10 @@
       <AdminCodeManager />
     </CollapsibleSection>
 
+    <CollapsibleSection title="กงล้อรับรางวัล" :open="shop.state.adminPanelOpen.spin" @toggle="shop.togglePanel('spin')">
+      <AdminSpinManager />
+    </CollapsibleSection>
+
     <CollapsibleSection title="รายการเติมเงิน" :open="shop.state.adminPanelOpen.topups" @toggle="shop.togglePanel('topups')">
       <AdminTopupList />
     </CollapsibleSection>
@@ -44,6 +48,7 @@ import AdminStats from "./admin/AdminStats.vue";
 import AdminProductForm from "./admin/AdminProductForm.vue";
 import AdminStockForm from "./admin/AdminStockForm.vue";
 import AdminCodeManager from "./admin/AdminCodeManager.vue";
+import AdminSpinManager from "./admin/AdminSpinManager.vue";
 import AdminTopupList from "./admin/AdminTopupList.vue";
 import AdminProductList from "./admin/AdminProductList.vue";
 import AdminUserList from "./admin/AdminUserList.vue";

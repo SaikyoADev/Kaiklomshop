@@ -577,6 +577,221 @@ api.delete("/admin/codes/:id", async (req, res) => {
   res.json({ ok: true });
 });
 
+// ---- Spin wheel ----
+
+async function getSpinSettings() {
+  const [rows] = await pool.query("SELECT * FROM spin_settings WHERE id = 1");
+  return rows[0] || { costPerSpin: 10 };
+}
+
+async function getEligiblePrizesForSpin(conn) {
+  // Active prizes only; product prizes need at least 1 unsold stock item to be eligible right now.
+  const [rows] = await conn.query("SELECT * FROM spin_prizes WHERE active = 1");
+  const eligible = [];
+  for (const prize of rows) {
+    if (prize.type === "product") {
+      const [[{ c }]] = await conn.query("SELECT COUNT(*) AS c FROM stock_items WHERE productId = ? AND sold = 0", [prize.productId]);
+      if (c > 0) eligible.push(prize);
+    } else {
+      eligible.push(prize);
+    }
+  }
+  return eligible;
+}
+
+function pickWeighted(prizes) {
+  const total = prizes.reduce((sum, p) => sum + p.weight, 0);
+  let roll = Math.random() * total;
+  for (const prize of prizes) {
+    if (roll < prize.weight) return prize;
+    roll -= prize.weight;
+  }
+  return prizes[prizes.length - 1];
+}
+
+api.get("/spin", async (req, res) => {
+  const settings = await getSpinSettings();
+  const [rows] = await pool.query("SELECT * FROM spin_prizes WHERE active = 1 ORDER BY createdAt ASC");
+  const total = rows.reduce((sum, p) => sum + p.weight, 0) || 1;
+  const prizes = rows.map((p) => ({
+    id: p.id,
+    label: p.label,
+    type: p.type,
+    color: p.color,
+    percent: Math.round((p.weight / total) * 1000) / 10,
+  }));
+  res.json({ ok: true, costPerSpin: Number(settings.costPerSpin), prizes });
+});
+
+api.post("/spin", async (req, res) => {
+  const user = await requireUser(req, res);
+  if (!user) return;
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [settingsRows] = await conn.query("SELECT * FROM spin_settings WHERE id = 1 FOR UPDATE");
+    const cost = Number(settingsRows[0]?.costPerSpin ?? 10);
+
+    const [userRows] = await conn.query("SELECT * FROM users WHERE id = ? FOR UPDATE", [user.id]);
+    const freshUser = userRows[0];
+    if (Number(freshUser.points) < cost) {
+      await conn.rollback();
+      return res.status(400).json({ ok: false, message: "พอยต์ไม่เพียงพอสำหรับหมุนกงล้อ" });
+    }
+
+    const eligible = await getEligiblePrizesForSpin(conn);
+    if (!eligible.length) {
+      await conn.rollback();
+      return res.status(400).json({ ok: false, message: "ยังไม่มีของรางวัลให้หมุนตอนนี้" });
+    }
+
+    const prize = pickWeighted(eligible);
+    const newPoints = Number(freshUser.points) - cost;
+    await conn.query("UPDATE users SET points = ? WHERE id = ?", [newPoints, user.id]);
+
+    let pointsWon = 0;
+    let codeWon = null;
+    const createdAt = now();
+
+    if (prize.type === "points") {
+      pointsWon = Number(prize.pointsValue) || 0;
+      await conn.query("UPDATE users SET points = points + ? WHERE id = ?", [pointsWon, user.id]);
+    } else if (prize.type === "code") {
+      pointsWon = Number(prize.pointsValue) || 0;
+      codeWon = `SPIN-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
+      await conn.query(
+        "INSERT INTO redeem_codes (id, code, points, maxUses, createdAt, createdBy) VALUES (?,?,?,?,?,?)",
+        [id("code"), codeWon, pointsWon, 1, createdAt, "spin-wheel"]
+      );
+    } else if (prize.type === "product") {
+      const [stockRows] = await conn.query(
+        "SELECT * FROM stock_items WHERE productId = ? AND sold = 0 ORDER BY createdAt ASC LIMIT 1 FOR UPDATE",
+        [prize.productId]
+      );
+      const stockItem = stockRows[0];
+      if (stockItem) {
+        const [productRows] = await conn.query("SELECT * FROM products WHERE id = ?", [prize.productId]);
+        const product = productRows[0];
+        const orderId = id("order");
+        await conn.query("UPDATE stock_items SET sold = 1, orderId = ? WHERE id = ?", [orderId, stockItem.id]);
+        await conn.query(
+          `INSERT INTO orders (id, userId, productId, productTitle, price, stockItemId, cred_username_enc, cred_password_enc, cred_note, createdAt)
+           VALUES (?,?,?,?,?,?,?,?,?,?)`,
+          [orderId, user.id, prize.productId, product?.title || prize.label, 0, stockItem.id, stockItem.username_enc, stockItem.password_enc, stockItem.note || "", createdAt]
+        );
+      }
+    }
+
+    await conn.query(
+      "INSERT INTO spin_history (id, userId, prizeId, prizeLabel, prizeType, pointsWon, codeWon, createdAt) VALUES (?,?,?,?,?,?,?,?)",
+      [id("spin"), user.id, prize.id, prize.label, prize.type, pointsWon, codeWon, createdAt]
+    );
+
+    await conn.commit();
+
+    const [finalUserRows] = await pool.query("SELECT * FROM users WHERE id = ?", [user.id]);
+    res.json({
+      ok: true,
+      prizeId: prize.id,
+      prizeLabel: prize.label,
+      prizeType: prize.type,
+      pointsWon,
+      codeWon,
+      user: publicUser(finalUserRows[0]),
+    });
+  } catch (error) {
+    await conn.rollback();
+    console.error(error);
+    res.status(500).json({ ok: false, message: "เกิดข้อผิดพลาด กรุณาลองใหม่" });
+  } finally {
+    conn.release();
+  }
+});
+
+api.get("/admin/spin-prizes", async (req, res) => {
+  const admin = await requireAdmin(req, res);
+  if (!admin) return;
+  const [rows] = await pool.query("SELECT * FROM spin_prizes ORDER BY createdAt ASC");
+  const total = rows.filter((p) => p.active).reduce((sum, p) => sum + p.weight, 0) || 1;
+  const prizes = await Promise.all(
+    rows.map(async (p) => {
+      let stock = null;
+      if (p.type === "product" && p.productId) stock = await stockCountFor(p.productId);
+      return { ...p, weight: Number(p.weight), pointsValue: p.pointsValue !== null ? Number(p.pointsValue) : null, percent: Math.round((p.weight / total) * 1000) / 10, stock };
+    })
+  );
+  const settings = await getSpinSettings();
+  res.json({ ok: true, prizes, costPerSpin: Number(settings.costPerSpin) });
+});
+
+api.post("/admin/spin-prizes", async (req, res) => {
+  const admin = await requireAdmin(req, res);
+  if (!admin) return;
+  const type = ["points", "code", "product"].includes(req.body.type) ? req.body.type : "points";
+  const label = String(req.body.label || "").trim();
+  const weight = Math.max(1, Math.round(Number(req.body.weight || 10)));
+  const color = String(req.body.color || "#f59e0b").trim();
+  const pointsValue = type !== "product" ? Math.max(0, Math.round(Number(req.body.pointsValue || 0))) : null;
+  const productId = type === "product" ? String(req.body.productId || "").trim() : null;
+
+  if (!label) return res.status(400).json({ ok: false, message: "กรุณากรอกชื่อรางวัล" });
+  if (type === "product" && !productId) return res.status(400).json({ ok: false, message: "กรุณาเลือกสินค้าสำหรับรางวัลนี้" });
+
+  const prizeId = id("prize");
+  await pool.query(
+    "INSERT INTO spin_prizes (id, label, type, pointsValue, productId, color, weight, active, createdAt) VALUES (?,?,?,?,?,?,?,1,?)",
+    [prizeId, label, type, pointsValue, productId, color, weight, now()]
+  );
+  res.status(201).json({ ok: true, prizeId });
+});
+
+api.patch("/admin/spin-prizes/:id", async (req, res) => {
+  const admin = await requireAdmin(req, res);
+  if (!admin) return;
+  const [rows] = await pool.query("SELECT * FROM spin_prizes WHERE id = ?", [req.params.id]);
+  const prize = rows[0];
+  if (!prize) return res.status(404).json({ ok: false, message: "ไม่พบรางวัลนี้" });
+
+  const updated = { ...prize };
+  if (req.body.label !== undefined) updated.label = String(req.body.label).trim();
+  if (req.body.weight !== undefined) updated.weight = Math.max(1, Math.round(Number(req.body.weight || 10)));
+  if (req.body.color !== undefined) updated.color = String(req.body.color).trim();
+  if (req.body.pointsValue !== undefined) updated.pointsValue = Math.max(0, Math.round(Number(req.body.pointsValue || 0)));
+  if (req.body.active !== undefined) updated.active = req.body.active ? 1 : 0;
+
+  await pool.query(
+    "UPDATE spin_prizes SET label=?, weight=?, color=?, pointsValue=?, active=? WHERE id=?",
+    [updated.label, updated.weight, updated.color, updated.pointsValue, updated.active, prize.id]
+  );
+  res.json({ ok: true });
+});
+
+api.delete("/admin/spin-prizes/:id", async (req, res) => {
+  const admin = await requireAdmin(req, res);
+  if (!admin) return;
+  await pool.query("DELETE FROM spin_prizes WHERE id = ?", [req.params.id]);
+  res.json({ ok: true });
+});
+
+api.patch("/admin/spin-settings", async (req, res) => {
+  const admin = await requireAdmin(req, res);
+  if (!admin) return;
+  const costPerSpin = Math.max(1, Math.round(Number(req.body.costPerSpin || 10)));
+  await pool.query("UPDATE spin_settings SET costPerSpin = ? WHERE id = 1", [costPerSpin]);
+  res.json({ ok: true, costPerSpin });
+});
+
+api.get("/admin/spin-history", async (req, res) => {
+  const admin = await requireAdmin(req, res);
+  if (!admin) return;
+  const [rows] = await pool.query(
+    `SELECT h.*, u.username, u.name FROM spin_history h LEFT JOIN users u ON u.id = h.userId ORDER BY h.createdAt DESC LIMIT 100`
+  );
+  res.json({ ok: true, history: rows.map((r) => ({ ...r, pointsWon: Number(r.pointsWon) })) });
+});
+
 app.use("/api", api);
 
 if (isProd) {

@@ -24,11 +24,14 @@ const state = reactive({
   redeemForm: { code: "" },
   adminCodeForm: { code: "", points: "", maxUses: 1, expiresAt: "" },
   adminCodes: [],
+  spin: { costPerSpin: 0, prizes: [], spinning: false, lastResult: null },
+  adminSpin: { prizes: [], costPerSpin: 0, prizeForm: { label: "", type: "points", pointsValue: "", productId: "", weight: 10, color: "#f59e0b" } },
   adminPanelOpen: {
     stats: true,
     addProduct: false,
     addStock: false,
     codes: false,
+    spin: false,
     topups: false,
     products: false,
     users: false,
@@ -136,9 +139,11 @@ async function setView(view) {
   window.scrollTo({ top: 0, behavior: "smooth" });
   if (view === "topup") await loadTopups();
   if (view === "orders") await loadOrders();
+  if (view === "spin") await loadSpin();
   if (view === "admin") {
     await loadAdmin();
     await loadAdminCodes();
+    await loadAdminSpin();
   }
 }
 
@@ -422,6 +427,120 @@ async function deleteAdminCode(code) {
   }
 }
 
+// ---- Spin wheel (user side) ----
+
+async function loadSpin() {
+  try {
+    const data = await api("/api/spin");
+    state.spin.costPerSpin = data.costPerSpin;
+    state.spin.prizes = data.prizes;
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function spinWheel(openAuthFn) {
+  if (!requireLogin(openAuthFn)) return;
+  if (state.spin.spinning) return;
+  if (!state.me || state.me.points < state.spin.costPerSpin) {
+    toast("พอยต์ไม่เพียงพอสำหรับหมุนกงล้อ");
+    return;
+  }
+  state.spin.spinning = true;
+  state.spin.lastResult = null;
+  try {
+    const data = await api("/api/spin", { method: "POST" });
+    state.me = data.user;
+    state.spin.lastResult = data;
+    return data;
+  } catch (error) {
+    toast(error.message);
+    state.spin.spinning = false;
+    return null;
+  }
+}
+
+function finishSpinAnimation() {
+  state.spin.spinning = false;
+}
+
+// ---- Spin wheel (admin side) ----
+
+async function loadAdminSpin() {
+  if (!isAdmin.value) return;
+  try {
+    const data = await api("/api/admin/spin-prizes");
+    state.adminSpin.prizes = data.prizes;
+    state.adminSpin.costPerSpin = data.costPerSpin;
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function createSpinPrize() {
+  const form = state.adminSpin.prizeForm;
+  if (!form.label.trim()) {
+    toast("กรุณากรอกชื่อรางวัล");
+    return;
+  }
+  if (form.type === "product" && !form.productId) {
+    toast("กรุณาเลือกสินค้าสำหรับรางวัลนี้");
+    return;
+  }
+  try {
+    await api("/api/admin/spin-prizes", {
+      method: "POST",
+      body: JSON.stringify({
+        label: form.label,
+        type: form.type,
+        pointsValue: form.pointsValue || 0,
+        productId: form.productId || undefined,
+        weight: form.weight || 10,
+        color: form.color || "#f59e0b",
+      }),
+    });
+    state.adminSpin.prizeForm = { label: "", type: "points", pointsValue: "", productId: "", weight: 10, color: "#f59e0b" };
+    toast("เพิ่มรางวัลแล้ว");
+    await loadAdminSpin();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function updateSpinPrize(prize) {
+  try {
+    await api(`/api/admin/spin-prizes/${prize.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ label: prize.label, weight: prize.weight, color: prize.color, pointsValue: prize.pointsValue, active: prize.active }),
+    });
+    toast("บันทึกรางวัลแล้ว");
+    await loadAdminSpin();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function deleteSpinPrize(prize) {
+  const ok = confirm(`ต้องการลบรางวัล "${prize.label}" ใช่หรือไม่`);
+  if (!ok) return;
+  try {
+    await api(`/api/admin/spin-prizes/${prize.id}`, { method: "DELETE" });
+    toast("ลบรางวัลแล้ว");
+    await loadAdminSpin();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function updateSpinCost() {
+  try {
+    await api("/api/admin/spin-settings", { method: "PATCH", body: JSON.stringify({ costPerSpin: state.adminSpin.costPerSpin }) });
+    toast("บันทึกราคาต่อการหมุนแล้ว");
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
 function togglePanel(key) {
   state.adminPanelOpen[key] = !state.adminPanelOpen[key];
 }
@@ -462,6 +581,14 @@ export function useShop() {
     createAdminCode,
     toggleAdminCode,
     deleteAdminCode,
+    loadSpin,
+    spinWheel,
+    finishSpinAnimation,
+    loadAdminSpin,
+    createSpinPrize,
+    updateSpinPrize,
+    deleteSpinPrize,
+    updateSpinCost,
     togglePanel,
   };
 }

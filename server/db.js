@@ -123,6 +123,41 @@ async function createSchema() {
         INDEX idx_redeem_uses_code (codeId)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS spin_prizes (
+        id VARCHAR(64) PRIMARY KEY,
+        label VARCHAR(255) NOT NULL,
+        type VARCHAR(16) NOT NULL,
+        pointsValue INT,
+        productId VARCHAR(64),
+        color VARCHAR(16) NOT NULL DEFAULT '#f59e0b',
+        weight INT NOT NULL DEFAULT 10,
+        active TINYINT(1) NOT NULL DEFAULT 1,
+        createdAt DATETIME NOT NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS spin_settings (
+        id INT PRIMARY KEY DEFAULT 1,
+        costPerSpin INT NOT NULL DEFAULT 10
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+    await conn.query(`INSERT IGNORE INTO spin_settings (id, costPerSpin) VALUES (1, 10);`);
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS spin_history (
+        id VARCHAR(64) PRIMARY KEY,
+        userId VARCHAR(64) NOT NULL,
+        prizeId VARCHAR(64),
+        prizeLabel VARCHAR(255) NOT NULL,
+        prizeType VARCHAR(16) NOT NULL,
+        pointsWon INT NOT NULL DEFAULT 0,
+        codeWon VARCHAR(64),
+        createdAt DATETIME NOT NULL,
+        INDEX idx_spin_history_user (userId)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
   } finally {
     conn.release();
   }

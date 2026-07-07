@@ -7,6 +7,7 @@
     <HomeView @buy="(product) => shop.buyProduct(product, openAuth)" />
     <TopupView @submit-topup="shop.createTopup(openAuth)" />
     <OrdersView />
+    <SpinView :open-auth="openAuth" />
     <ProfileView />
     <AdminView />
   </main>
@@ -26,6 +27,7 @@ import NoticeBanner from "./components/NoticeBanner.vue";
 import HomeView from "./components/HomeView.vue";
 import TopupView from "./components/TopupView.vue";
 import OrdersView from "./components/OrdersView.vue";
+import SpinView from "./components/SpinView.vue";
 import ProfileView from "./components/ProfileView.vue";
 import AdminView from "./components/AdminView.vue";
 import AuthDialog from "./components/AuthDialog.vue";
