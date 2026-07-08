@@ -9,7 +9,7 @@
       </div>
 
       <div class="auth-pane" :class="{ active: shop.state.authTab === 'login' }">
-        <label>ชื่อผู้ใช้ <input v-model="shop.state.loginForm.username" autocomplete="username" placeholder="demo หรือ admin" /></label>
+        <label>ชื่อผู้ใช้ <input v-model="shop.state.loginForm.username" autocomplete="username" placeholder="Username" /></label>
         <label>รหัสผ่าน <input v-model="shop.state.loginForm.password" type="password" autocomplete="current-password" placeholder="••••••••" /></label>
         <button class="solid" type="button" @click="doLogin">เข้าสู่ระบบ</button>
       </div>
