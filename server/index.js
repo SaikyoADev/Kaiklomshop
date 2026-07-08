@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -38,7 +39,16 @@ function verifyPassword(password, user) {
 
 function publicUser(user) {
   if (!user) return null;
-  return { id: user.id, name: user.name, username: user.username, role: user.role, points: Number(user.points), createdAt: user.createdAt };
+  return {
+    id: user.id,
+    name: user.name,
+    username: user.username,
+    role: user.role,
+    points: Number(user.points),
+    banned: Boolean(user.banned),
+    banReason: user.banReason || "",
+    createdAt: user.createdAt,
+  };
 }
 
 function getAuth(req) {
@@ -63,6 +73,10 @@ async function requireUser(req, res) {
   const user = await getUserById(userId);
   if (!user) {
     res.status(401).json({ ok: false, message: "กรุณาเข้าสู่ระบบก่อน" });
+    return null;
+  }
+  if (user.banned) {
+    res.status(403).json({ ok: false, message: `บัญชีนี้ถูกระงับการใช้งาน${user.banReason ? `: ${user.banReason}` : ""}` });
     return null;
   }
   return user;
@@ -135,11 +149,31 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: "1mb" }));
 
+// General limiter: generous, just stops obvious bot abuse of the whole API.
+const generalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, message: "มีการเรียกใช้งานถี่เกินไป กรุณาลองใหม่อีกครั้ง" },
+});
+app.use("/api", generalLimiter);
+
+// Strict limiter for login/register — the actual brute-force protection.
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, message: "พยายามเข้าสู่ระบบถี่เกินไป กรุณารอสักครู่แล้วลองใหม่" },
+});
+
 const api = express.Router();
 
 api.get("/bootstrap", async (req, res) => {
   const userId = getAuth(req);
-  const me = await getUserById(userId);
+  let me = await getUserById(userId);
+  if (me && me.banned) me = null;
   const [productRows] = await pool.query("SELECT * FROM products WHERE status = 'active' ORDER BY createdAt DESC");
   const products = await Promise.all(productRows.map(productWithStock));
   const [categoryRows] = await pool.query("SELECT DISTINCT category FROM products");
@@ -153,13 +187,13 @@ api.get("/bootstrap", async (req, res) => {
     bank: {
       name: "ธนาคารกรุงไทย",
       accountName: "นายณัฐวุฒิ นิลทะราช",
-      accountNo: "660-***-***-*",
+      accountNo: "กรอกเลขบัญชีของคุณที่นี่ (server/index.js)",
       lineNote: "เมื่อมีเงินเข้า ให้เจ้าของร้านดูแจ้งเตือน LINE Krungthai แล้วนำเลขอ้างอิงมากดยืนยันในหลังบ้าน",
     },
   });
 });
 
-api.post("/register", async (req, res) => {
+api.post("/register", authLimiter, async (req, res) => {
   const name = String(req.body.name || "").trim();
   const username = String(req.body.username || "").trim().toLowerCase();
   const password = String(req.body.password || "");
@@ -180,13 +214,16 @@ api.post("/register", async (req, res) => {
   res.status(201).json({ ok: true, token, user: publicUser(user) });
 });
 
-api.post("/login", async (req, res) => {
+api.post("/login", authLimiter, async (req, res) => {
   const username = String(req.body.username || "").trim().toLowerCase();
   const password = String(req.body.password || "");
   const [rows] = await pool.query("SELECT * FROM users WHERE username = ?", [username]);
   const user = rows[0];
   if (!user || !verifyPassword(password, user)) {
     return res.status(400).json({ ok: false, message: "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง" });
+  }
+  if (user.banned) {
+    return res.status(403).json({ ok: false, message: `บัญชีนี้ถูกระงับการใช้งาน${user.banReason ? `: ${user.banReason}` : ""}` });
   }
   const token = crypto.randomBytes(24).toString("hex");
   sessions.set(token, { userId: user.id, expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000 });
@@ -303,7 +340,6 @@ api.get("/admin", async (req, res) => {
   const admin = await requireAdmin(req, res);
   if (!admin) return;
 
-  const [userRows] = await pool.query("SELECT * FROM users ORDER BY createdAt DESC");
   const [productRows] = await pool.query("SELECT * FROM products ORDER BY createdAt DESC");
   const products = await Promise.all(productRows.map(productWithStock));
   const [topupRows] = await pool.query("SELECT * FROM topups WHERE adminHidden = 0 ORDER BY createdAt DESC");
@@ -316,12 +352,34 @@ api.get("/admin", async (req, res) => {
 
   res.json({
     ok: true,
-    users: userRows.map(publicUser),
     products,
     topups,
     orders: orderRows.map((o) => ({ ...o, price: Number(o.price) })),
     stats: { userCount, memberCount, pendingTopups, orderCount },
   });
+});
+
+// Paginated + searchable member list — keeps the admin panel usable once there are
+// hundreds of members instead of dumping everyone into one long unscrollable list.
+api.get("/admin/users", async (req, res) => {
+  const admin = await requireAdmin(req, res);
+  if (!admin) return;
+
+  const page = Math.max(1, Math.round(Number(req.query.page || 1)));
+  const pageSize = Math.min(100, Math.max(1, Math.round(Number(req.query.pageSize || 20))));
+  const search = String(req.query.search || "").trim();
+  const offset = (page - 1) * pageSize;
+
+  const whereClause = search ? "WHERE username LIKE ? OR name LIKE ?" : "";
+  const params = search ? [`%${search}%`, `%${search}%`] : [];
+
+  const [[{ total }]] = await pool.query(`SELECT COUNT(*) AS total FROM users ${whereClause}`, params);
+  const [rows] = await pool.query(
+    `SELECT * FROM users ${whereClause} ORDER BY createdAt DESC LIMIT ? OFFSET ?`,
+    [...params, pageSize, offset]
+  );
+
+  res.json({ ok: true, users: rows.map(publicUser), total, page, pageSize });
 });
 
 api.post("/admin/products", async (req, res) => {
@@ -456,14 +514,23 @@ api.post("/admin/users/:id/points", async (req, res) => {
   const user = await getUserById(req.params.id);
   if (!user) return res.status(404).json({ ok: false, message: "ไม่พบผู้ใช้" });
   const amount = Math.round(Number(req.body.amount || 0));
-  const note = String(req.body.note || "เพิ่มพอยต์โดยแอดมิน").trim();
-  if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ ok: false, message: "กรุณากรอกจำนวนพอยต์มากกว่า 0" });
+  const defaultNote = amount >= 0 ? "เพิ่มพอยต์โดยแอดมิน" : "ลดพอยต์โดยแอดมิน";
+  const note = String(req.body.note || defaultNote).trim();
+  if (!Number.isFinite(amount) || amount === 0) {
+    return res.status(400).json({ ok: false, message: "กรุณากรอกจำนวนพอยต์ (ใส่เลขติดลบเพื่อลด)" });
+  }
+  if (amount < 0 && Number(user.points) + amount < 0) {
+    return res.status(400).json({ ok: false, message: "พอยต์ของสมาชิกจะติดลบ กรุณาใส่จำนวนที่น้อยกว่านี้" });
+  }
 
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
     await conn.query("UPDATE users SET points = points + ? WHERE id = ?", [amount, user.id]);
-    const topup = { id: id("topup"), userId: user.id, amount, slipRef: "ADMIN-MANUAL", status: "approved", lineRef: "admin-direct", note, source: "admin", createdAt: now(), reviewedAt: now(), reviewedBy: admin.id };
+    const topup = {
+      id: id("topup"), userId: user.id, amount, slipRef: "ADMIN-MANUAL", status: "approved",
+      lineRef: "admin-direct", note, source: "admin", createdAt: now(), reviewedAt: now(), reviewedBy: admin.id,
+    };
     await conn.query(
       `INSERT INTO topups (id, userId, amount, slipRef, status, lineRef, note, source, createdAt, reviewedAt, reviewedBy)
        VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
@@ -480,6 +547,49 @@ api.post("/admin/users/:id/points", async (req, res) => {
   const freshUser = await getUserById(user.id);
   const [topupRows] = await pool.query("SELECT * FROM topups WHERE userId = ? ORDER BY createdAt DESC LIMIT 1", [user.id]);
   res.json({ ok: true, user: publicUser(freshUser), topup: await topupWithUser(topupRows[0]) });
+});
+
+api.patch("/admin/users/:id/role", async (req, res) => {
+  const admin = await requireAdmin(req, res);
+  if (!admin) return;
+  const user = await getUserById(req.params.id);
+  if (!user) return res.status(404).json({ ok: false, message: "ไม่พบผู้ใช้" });
+  const role = req.body.role === "admin" ? "admin" : "user";
+
+  if (user.id === admin.id && role === "user") {
+    return res.status(400).json({ ok: false, message: "ไม่สามารถถอดสิทธิ์แอดมินของตัวเองได้" });
+  }
+  if (user.role === "admin" && role === "user") {
+    const [[{ adminCount }]] = await pool.query("SELECT COUNT(*) AS adminCount FROM users WHERE role = 'admin'");
+    if (adminCount <= 1) {
+      return res.status(400).json({ ok: false, message: "ต้องมีแอดมินอย่างน้อย 1 คนเสมอ" });
+    }
+  }
+
+  await pool.query("UPDATE users SET role = ? WHERE id = ?", [role, user.id]);
+  const freshUser = await getUserById(user.id);
+  res.json({ ok: true, user: publicUser(freshUser) });
+});
+
+api.patch("/admin/users/:id/ban", async (req, res) => {
+  const admin = await requireAdmin(req, res);
+  if (!admin) return;
+  const user = await getUserById(req.params.id);
+  if (!user) return res.status(404).json({ ok: false, message: "ไม่พบผู้ใช้" });
+  if (user.role === "admin") return res.status(400).json({ ok: false, message: "ไม่สามารถแบนบัญชีแอดมินได้" });
+
+  const banned = Boolean(req.body.banned);
+  const banReason = banned ? String(req.body.reason || "").trim() : null;
+  await pool.query("UPDATE users SET banned = ?, banReason = ? WHERE id = ?", [banned ? 1 : 0, banReason, user.id]);
+
+  if (banned) {
+    for (const [token, session] of sessions.entries()) {
+      if (session.userId === user.id) sessions.delete(token);
+    }
+  }
+
+  const freshUser = await getUserById(user.id);
+  res.json({ ok: true, user: publicUser(freshUser) });
 });
 
 api.delete("/admin/users/:id", async (req, res) => {

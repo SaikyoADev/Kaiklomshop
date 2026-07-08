@@ -20,11 +20,13 @@ const state = reactive({
   topups: [],
   orders: [],
   visibleSecrets: {},
-  admin: { users: [], products: [], topups: [], orders: [], stats: {} },
+  admin: { products: [], topups: [], orders: [], stats: {} },
+  adminUsers: { list: [], total: 0, page: 1, pageSize: 20, search: "" },
   redeemForm: { code: "" },
   adminCodeForm: { code: "", points: "", maxUses: 1, expiresAt: "" },
   adminCodes: [],
   spin: { costPerSpin: 0, prizes: [], spinning: false, lastResult: null },
+  purchase: { pendingProduct: null, confirming: false },
   adminSpin: { prizes: [], costPerSpin: 0, prizeForm: { label: "", type: "points", pointsValue: "", productId: "", weight: 10, color: "#f59e0b" } },
   adminPanelOpen: {
     stats: true,
@@ -122,7 +124,6 @@ async function loadAdmin() {
     const data = await api("/api/admin");
     state.admin = {
       ...data,
-      users: data.users.map((user) => ({ ...user, pointInput: "" })),
       products: data.products.map((product) => ({ ...product })),
       topups: data.topups.map((topup) => ({ ...topup, lineInput: "" })),
     };
@@ -142,6 +143,7 @@ async function setView(view) {
   if (view === "spin") await loadSpin();
   if (view === "admin") {
     await loadAdmin();
+    await loadAdminUsers();
     await loadAdminCodes();
     await loadAdminSpin();
   }
@@ -191,18 +193,34 @@ function logout() {
   toast("ออกจากระบบแล้ว");
 }
 
-async function buyProduct(product, openAuthFn) {
+function requestPurchase(product, openAuthFn) {
   if (!requireLogin(openAuthFn)) return;
-  const ok = confirm(`ยืนยันซื้อ "${product.title}" ราคา ${baht(product.price)} ใช่หรือไม่`);
-  if (!ok) return;
+  if (product.stock < 1) {
+    toast("สินค้าหมดสต็อก");
+    return;
+  }
+  state.purchase.pendingProduct = product;
+}
+
+function cancelPurchase() {
+  state.purchase.pendingProduct = null;
+}
+
+async function confirmPurchase() {
+  const product = state.purchase.pendingProduct;
+  if (!product) return;
+  state.purchase.confirming = true;
   try {
     const data = await api("/api/purchase", { method: "POST", body: JSON.stringify({ productId: product.id }) });
     state.me = data.user;
     await loadBootstrap();
     toast("ซื้อสำเร็จ ดูรหัสได้ในประวัติการซื้อ");
+    state.purchase.pendingProduct = null;
     await setView("orders");
   } catch (error) {
     toast(error.message);
+  } finally {
+    state.purchase.confirming = false;
   }
 }
 
@@ -319,20 +337,83 @@ async function hideReviewedTopups() {
   }
 }
 
-async function addPointsToUser(user) {
-  const amount = Number(user.pointInput || 0);
-  if (!amount || amount <= 0) {
-    toast("กรุณากรอกจำนวนพอยต์ที่ต้องการเพิ่ม");
+async function loadAdminUsers(page = state.adminUsers.page) {
+  if (!isAdmin.value) return;
+  try {
+    const params = new URLSearchParams({
+      page: String(page),
+      pageSize: String(state.adminUsers.pageSize),
+      search: state.adminUsers.search || "",
+    });
+    const data = await api(`/api/admin/users?${params.toString()}`);
+    state.adminUsers.list = data.users.map((user) => ({ ...user, pointInput: "" }));
+    state.adminUsers.total = data.total;
+    state.adminUsers.page = data.page;
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function searchAdminUsers() {
+  await loadAdminUsers(1);
+}
+
+async function goToUsersPage(page) {
+  const maxPage = Math.max(1, Math.ceil(state.adminUsers.total / state.adminUsers.pageSize));
+  const target = Math.min(Math.max(1, page), maxPage);
+  await loadAdminUsers(target);
+}
+
+async function adjustUserPoints(user, sign) {
+  const rawAmount = Number(user.pointInput || 0);
+  if (!rawAmount || rawAmount <= 0) {
+    toast("กรุณากรอกจำนวนพอยต์ที่ต้องการปรับ");
     return;
   }
+  const amount = sign * rawAmount;
   try {
     await api(`/api/admin/users/${user.id}/points`, {
       method: "POST",
-      body: JSON.stringify({ amount, note: "เพิ่มพอยต์โดยตรงจากหลังบ้าน" }),
+      body: JSON.stringify({ amount, note: sign > 0 ? "เพิ่มพอยต์โดยตรงจากหลังบ้าน" : "ลดพอยต์โดยตรงจากหลังบ้าน" }),
     });
-    toast("เพิ่มพอยต์ให้สมาชิกแล้ว");
+    toast(sign > 0 ? "เพิ่มพอยต์ให้สมาชิกแล้ว" : "ลดพอยต์สมาชิกแล้ว");
     await loadBootstrap();
-    await loadAdmin();
+    await loadAdminUsers();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function setUserRole(user, role) {
+  const ok = confirm(role === "admin" ? `ตั้งให้ "${user.username}" เป็นแอดมินใช่หรือไม่` : `ถอดสิทธิ์แอดมินของ "${user.username}" ใช่หรือไม่`);
+  if (!ok) return;
+  try {
+    await api(`/api/admin/users/${user.id}/role`, { method: "PATCH", body: JSON.stringify({ role }) });
+    toast("ปรับสิทธิ์สมาชิกแล้ว");
+    await loadAdminUsers();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function toggleBanUser(user) {
+  if (user.banned) {
+    const ok = confirm(`ต้องการปลดแบน "${user.username}" ใช่หรือไม่`);
+    if (!ok) return;
+    try {
+      await api(`/api/admin/users/${user.id}/ban`, { method: "PATCH", body: JSON.stringify({ banned: false }) });
+      toast("ปลดแบนสมาชิกแล้ว");
+      await loadAdminUsers();
+    } catch (error) {
+      toast(error.message);
+    }
+    return;
+  }
+  const reason = prompt(`เหตุผลที่แบน "${user.username}" (ไม่บังคับ)`) || "";
+  try {
+    await api(`/api/admin/users/${user.id}/ban`, { method: "PATCH", body: JSON.stringify({ banned: true, reason }) });
+    toast("แบนสมาชิกแล้ว");
+    await loadAdminUsers();
   } catch (error) {
     toast(error.message);
   }
@@ -345,7 +426,7 @@ async function deleteUser(user) {
     await api(`/api/admin/users/${user.id}`, { method: "DELETE" });
     toast("ลบสมาชิกแล้ว");
     await loadBootstrap();
-    await loadAdmin();
+    await loadAdminUsers();
   } catch (error) {
     toast(error.message);
   }
@@ -559,12 +640,17 @@ export function useShop() {
     loadTopups,
     loadOrders,
     loadAdmin,
+    loadAdminUsers,
+    searchAdminUsers,
+    goToUsersPage,
     setView,
     requireLogin,
     login,
     register,
     logout,
-    buyProduct,
+    requestPurchase,
+    cancelPurchase,
+    confirmPurchase,
     createTopup,
     toggleSecret,
     createProduct,
@@ -574,7 +660,9 @@ export function useShop() {
     reviewTopup,
     hideTopup,
     hideReviewedTopups,
-    addPointsToUser,
+    adjustUserPoints,
+    setUserRole,
+    toggleBanUser,
     deleteUser,
     redeemCode,
     loadAdminCodes,

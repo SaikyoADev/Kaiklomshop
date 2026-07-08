@@ -18,6 +18,20 @@ export const pool = mysql.createPool({
   charset: "utf8mb4_unicode_ci",
 });
 
+// Adds a column to an existing table only if it doesn't already exist yet.
+// Safe to call every startup — makes it possible to evolve the schema without
+// breaking databases that were created before a given feature existed.
+async function ensureColumn(conn, table, column, definition) {
+  const [rows] = await conn.query(
+    `SELECT COUNT(*) AS c FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`,
+    [table, column]
+  );
+  if (rows[0].c === 0) {
+    await conn.query(`ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${definition}`);
+    console.log(`Migrated: added column ${table}.${column}`);
+  }
+}
+
 async function createSchema() {
   const conn = await pool.getConnection();
   try {
@@ -30,9 +44,15 @@ async function createSchema() {
         passwordHash VARCHAR(128) NOT NULL,
         role VARCHAR(16) NOT NULL DEFAULT 'user',
         points BIGINT NOT NULL DEFAULT 0,
+        banned TINYINT(1) NOT NULL DEFAULT 0,
+        banReason VARCHAR(255),
         createdAt DATETIME NOT NULL
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
+
+    // Add columns that may be missing on databases created before this feature existed.
+    await ensureColumn(conn, "users", "banned", "TINYINT(1) NOT NULL DEFAULT 0");
+    await ensureColumn(conn, "users", "banReason", "VARCHAR(255)");
 
     await conn.query(`
       CREATE TABLE IF NOT EXISTS products (

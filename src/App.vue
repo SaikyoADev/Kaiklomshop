@@ -4,7 +4,7 @@
   <main>
     <HeroSection />
     <NoticeBanner />
-    <HomeView @buy="(product) => shop.buyProduct(product, openAuth)" />
+    <HomeView @buy="(product) => shop.requestPurchase(product, openAuth)" />
     <TopupView @submit-topup="shop.createTopup(openAuth)" />
     <OrdersView />
     <SpinView :open-auth="openAuth" />
@@ -13,7 +13,9 @@
   </main>
 
   <AuthDialog ref="authDialogRef" />
+  <PurchaseConfirmDialog />
   <ToastMessage />
+  <MobileTabBar />
   <ChatFab />
 </template>
 
@@ -31,6 +33,8 @@ import SpinView from "./components/SpinView.vue";
 import ProfileView from "./components/ProfileView.vue";
 import AdminView from "./components/AdminView.vue";
 import AuthDialog from "./components/AuthDialog.vue";
+import PurchaseConfirmDialog from "./components/PurchaseConfirmDialog.vue";
+import MobileTabBar from "./components/MobileTabBar.vue";
 import ToastMessage from "./components/ToastMessage.vue";
 import ChatFab from "./components/ChatFab.vue";
 
