@@ -2,11 +2,12 @@ import "dotenv/config";
 import express from "express";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
+import cookieParser from "cookie-parser";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { pool, initDb } from "./db.js";
-import { encrypt, decrypt } from "./crypto.js";
+import { encrypt, decrypt, hashPassword, verifyPassword, passwordPolicyError } from "./crypto.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = __dirname;
@@ -28,14 +29,6 @@ function toMysqlDateLocal(value) {
 function id(prefix) {
   return `${prefix}_${crypto.randomBytes(8).toString("hex")}`;
 }
-function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
-  const hash = crypto.pbkdf2Sync(password, salt, 100000, 32, "sha256").toString("hex");
-  return { salt, hash };
-}
-function verifyPassword(password, user) {
-  const result = hashPassword(password, user.salt);
-  return crypto.timingSafeEqual(Buffer.from(result.hash, "hex"), Buffer.from(user.passwordHash, "hex"));
-}
 
 function publicUser(user) {
   if (!user) return null;
@@ -51,9 +44,25 @@ function publicUser(user) {
   };
 }
 
+const SESSION_COOKIE = "shopToken";
+const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+function setSessionCookie(res, token) {
+  res.cookie(SESSION_COOKIE, token, {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: "lax",
+    maxAge: SESSION_MAX_AGE_MS,
+    path: "/",
+  });
+}
+
+function clearSessionCookie(res) {
+  res.clearCookie(SESSION_COOKIE, { path: "/" });
+}
+
 function getAuth(req) {
-  const header = req.headers.authorization || "";
-  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+  const token = req.cookies?.[SESSION_COOKIE] || "";
   const session = sessions.get(token);
   if (!session || session.expiresAt < Date.now()) {
     if (token) sessions.delete(token);
@@ -117,6 +126,11 @@ function parseStockRows(text) {
 
 const app = express();
 
+// Railway (and most PaaS hosts) sit the app behind a reverse proxy. Without this,
+// express-rate-limit and req.ip would see the proxy's IP for every request — meaning
+// all users would share one rate-limit bucket instead of getting their own.
+app.set("trust proxy", 1);
+
 // Security headers (HSTS, CSP, X-Frame-Options, X-Content-Type-Options, etc.)
 app.use(
   helmet({
@@ -148,6 +162,7 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json({ limit: "1mb" }));
+app.use(cookieParser());
 
 // General limiter: generous, just stops obvious bot abuse of the whole API.
 const generalLimiter = rateLimit({
@@ -187,7 +202,7 @@ api.get("/bootstrap", async (req, res) => {
     bank: {
       name: "ธนาคารกรุงไทย",
       accountName: "นายณัฐวุฒิ นิลทะราช",
-      accountNo: "660-*-*****-*",
+      accountNo: "กรอกเลขบัญชีของคุณที่นี่ (server/index.js)",
       lineNote: "เมื่อมีเงินเข้า ให้เจ้าของร้านดูแจ้งเตือน LINE Krungthai แล้วนำเลขอ้างอิงมากดยืนยันในหลังบ้าน",
     },
   });
@@ -197,8 +212,12 @@ api.post("/register", authLimiter, async (req, res) => {
   const name = String(req.body.name || "").trim();
   const username = String(req.body.username || "").trim().toLowerCase();
   const password = String(req.body.password || "");
-  if (!name || !username || password.length < 6) {
-    return res.status(400).json({ ok: false, message: "กรุณากรอกข้อมูลให้ครบ (รหัสผ่านอย่างน้อย 6 ตัว)" });
+  if (!name || !username) {
+    return res.status(400).json({ ok: false, message: "กรุณากรอกชื่อและชื่อผู้ใช้" });
+  }
+  const passwordError = passwordPolicyError(password);
+  if (passwordError) {
+    return res.status(400).json({ ok: false, message: passwordError });
   }
   const [existing] = await pool.query("SELECT id FROM users WHERE username = ?", [username]);
   if (existing.length) return res.status(400).json({ ok: false, message: "มีชื่อผู้ใช้นี้แล้ว" });
@@ -210,8 +229,9 @@ api.post("/register", authLimiter, async (req, res) => {
     [user.id, user.name, user.username, user.salt, user.passwordHash, user.role, user.points, user.createdAt]
   );
   const token = crypto.randomBytes(24).toString("hex");
-  sessions.set(token, { userId: user.id, expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000 });
-  res.status(201).json({ ok: true, token, user: publicUser(user) });
+  sessions.set(token, { userId: user.id, expiresAt: Date.now() + SESSION_MAX_AGE_MS });
+  setSessionCookie(res, token);
+  res.status(201).json({ ok: true, user: publicUser(user) });
 });
 
 api.post("/login", authLimiter, async (req, res) => {
@@ -226,8 +246,16 @@ api.post("/login", authLimiter, async (req, res) => {
     return res.status(403).json({ ok: false, message: `บัญชีนี้ถูกระงับการใช้งาน${user.banReason ? `: ${user.banReason}` : ""}` });
   }
   const token = crypto.randomBytes(24).toString("hex");
-  sessions.set(token, { userId: user.id, expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000 });
-  res.json({ ok: true, token, user: publicUser(user) });
+  sessions.set(token, { userId: user.id, expiresAt: Date.now() + SESSION_MAX_AGE_MS });
+  setSessionCookie(res, token);
+  res.json({ ok: true, user: publicUser(user) });
+});
+
+api.post("/logout", async (req, res) => {
+  const token = req.cookies?.[SESSION_COOKIE];
+  if (token) sessions.delete(token);
+  clearSessionCookie(res);
+  res.json({ ok: true });
 });
 
 api.post("/purchase", async (req, res) => {
@@ -336,6 +364,35 @@ api.get("/orders", async (req, res) => {
   res.json({ ok: true, orders });
 });
 
+api.post("/me/change-password", authLimiter, async (req, res) => {
+  const user = await requireUser(req, res);
+  if (!user) return;
+
+  const currentPassword = String(req.body.currentPassword || "");
+  const newPassword = String(req.body.newPassword || "");
+
+  if (!verifyPassword(currentPassword, user)) {
+    return res.status(400).json({ ok: false, message: "รหัสผ่านปัจจุบันไม่ถูกต้อง" });
+  }
+  const passwordError = passwordPolicyError(newPassword);
+  if (passwordError) {
+    return res.status(400).json({ ok: false, message: passwordError });
+  }
+
+  const { salt, hash } = hashPassword(newPassword);
+  await pool.query("UPDATE users SET salt = ?, passwordHash = ? WHERE id = ?", [salt, hash, user.id]);
+
+  // Log out every other session for this account as a safety measure.
+  for (const [token, session] of sessions.entries()) {
+    if (session.userId === user.id) sessions.delete(token);
+  }
+  const newToken = crypto.randomBytes(24).toString("hex");
+  sessions.set(newToken, { userId: user.id, expiresAt: Date.now() + SESSION_MAX_AGE_MS });
+  setSessionCookie(res, newToken);
+
+  res.json({ ok: true, message: "เปลี่ยนรหัสผ่านสำเร็จ" });
+});
+
 api.get("/admin", async (req, res) => {
   const admin = await requireAdmin(req, res);
   if (!admin) return;
@@ -433,9 +490,26 @@ api.delete("/admin/products/:id", async (req, res) => {
   if (!product) return res.status(404).json({ ok: false, message: "ไม่พบสินค้า" });
 
   const [[{ soldCount }]] = await pool.query("SELECT COUNT(*) AS soldCount FROM stock_items WHERE productId = ? AND sold = 1", [product.id]);
+
+  // A spin-wheel prize pointing at this product would silently become unwinnable
+  // forever once the product is gone — deactivate it and tell the admin why.
+  const [affectedPrizes] = await pool.query(
+    "SELECT id, label FROM spin_prizes WHERE productId = ? AND active = 1",
+    [product.id]
+  );
+  if (affectedPrizes.length) {
+    await pool.query("UPDATE spin_prizes SET active = 0 WHERE productId = ?", [product.id]);
+  }
+
   await pool.query("DELETE FROM stock_items WHERE productId = ? AND sold = 0", [product.id]);
   await pool.query("DELETE FROM products WHERE id = ?", [product.id]);
-  res.json({ ok: true, deletedProductId: product.id, soldHistoryKept: soldCount });
+
+  res.json({
+    ok: true,
+    deletedProductId: product.id,
+    soldHistoryKept: soldCount,
+    deactivatedSpinPrizes: affectedPrizes.map((p) => p.label),
+  });
 });
 
 api.post("/admin/products/:id/stock", async (req, res) => {
@@ -942,11 +1016,20 @@ if (isProd) {
   app.use((req, res) => res.sendFile(path.join(distDir, "index.html")));
 }
 
+// Centralized error logger — catches anything that slipped past a route's own
+// try/catch (including rejected promises in async handlers, which Express 5
+// forwards here automatically). Logs full detail server-side, but only ever
+// sends a generic message to the client so nothing internal leaks.
+app.use((err, req, res, next) => {
+  console.error(`[unhandled error] ${req.method} ${req.originalUrl}:`, err);
+  if (res.headersSent) return next(err);
+  res.status(500).json({ ok: false, message: "เกิดข้อผิดพลาดที่เซิร์ฟเวอร์ กรุณาลองใหม่อีกครั้ง" });
+});
+
 async function start() {
   await initDb();
   app.listen(port, host, () => {
     console.log(`API server running at http://${host}:${port}/`);
-    console.log("Admin login: admin / admin1234 (เปลี่ยนรหัสผ่านทันทีก่อนใช้งานจริง)");
   });
 }
 

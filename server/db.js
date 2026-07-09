@@ -1,8 +1,9 @@
 import mysql from "mysql2/promise";
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { encrypt } from "./crypto.js";
+import { encrypt, hashPassword } from "./crypto.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const legacyJsonPath = path.join(__dirname, "database.legacy.json");
@@ -241,7 +242,42 @@ async function migrateFromJsonIfNeeded() {
   );
 }
 
+// If the database is completely empty (fresh install, no legacy JSON to migrate),
+// there would be no way to reach the admin panel at all. Create one admin account
+// from environment variables so the site owner always has a way in.
+async function bootstrapFirstAdminIfNeeded() {
+  const [[{ c }]] = await pool.query("SELECT COUNT(*) AS c FROM users");
+  if (c > 0) return; // users already exist (either migrated or previously bootstrapped)
+
+  const username = (process.env.INITIAL_ADMIN_USERNAME || "admin").trim().toLowerCase();
+  let password = process.env.INITIAL_ADMIN_PASSWORD;
+  let generated = false;
+  if (!password) {
+    password = crypto.randomBytes(9).toString("base64url"); // random, readable, ~12 chars
+    generated = true;
+  }
+
+  const { salt, hash } = hashPassword(password);
+  await pool.query(
+    "INSERT INTO users (id, name, username, salt, passwordHash, role, points, createdAt) VALUES (?,?,?,?,?,?,?,?)",
+    [`user_${crypto.randomBytes(8).toString("hex")}`, "ผู้ดูแลระบบ", username, salt, hash, "admin", 0, new Date().toISOString().slice(0, 19).replace("T", " ")]
+  );
+
+  console.log("=".repeat(60));
+  console.log("No users existed yet — created a first admin account:");
+  console.log(`  username: ${username}`);
+  if (generated) {
+    console.log(`  password: ${password}  (auto-generated — save this now, it will not be shown again)`);
+    console.log(`  Tip: set INITIAL_ADMIN_USERNAME / INITIAL_ADMIN_PASSWORD env vars to control this instead.`);
+  } else {
+    console.log(`  password: (the value you set in INITIAL_ADMIN_PASSWORD)`);
+  }
+  console.log("Change this password immediately after logging in.");
+  console.log("=".repeat(60));
+}
+
 export async function initDb() {
   await createSchema();
   await migrateFromJsonIfNeeded();
+  await bootstrapFirstAdminIfNeeded();
 }

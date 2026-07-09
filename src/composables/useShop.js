@@ -2,7 +2,6 @@ import { reactive, computed } from "vue";
 
 // Singleton reactive state shared across every component (like a tiny store).
 const state = reactive({
-  token: localStorage.getItem("shopToken") || "",
   me: null,
   products: [],
   categories: [],
@@ -14,6 +13,7 @@ const state = reactive({
   toastTimer: null,
   loginForm: { username: "", password: "" },
   registerForm: { name: "", username: "", password: "" },
+  changePasswordForm: { currentPassword: "", newPassword: "", confirmPassword: "" },
   topupForm: { amount: "", slipRef: "", transferAt: "" },
   productForm: { title: "", game: "Roblox", category: "Roblox ID", price: "", image: "", description: "" },
   stockForm: { productId: "", rows: "" },
@@ -67,9 +67,9 @@ function toast(message) {
 async function api(path, options = {}) {
   const response = await fetch(path, {
     ...options,
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
       ...(options.headers || {}),
     },
   });
@@ -159,9 +159,7 @@ function requireLogin(openAuthFn) {
 async function login() {
   try {
     const data = await api("/api/login", { method: "POST", body: JSON.stringify(state.loginForm) });
-    state.token = data.token;
     state.me = data.user;
-    localStorage.setItem("shopToken", state.token);
     toast("เข้าสู่ระบบสำเร็จ");
     return true;
   } catch (error) {
@@ -173,9 +171,7 @@ async function login() {
 async function register() {
   try {
     const data = await api("/api/register", { method: "POST", body: JSON.stringify(state.registerForm) });
-    state.token = data.token;
     state.me = data.user;
-    localStorage.setItem("shopToken", state.token);
     toast("สมัครสมาชิกสำเร็จ");
     return true;
   } catch (error) {
@@ -184,11 +180,35 @@ async function register() {
   }
 }
 
-function logout() {
-  state.token = "";
+async function changePassword() {
+  const form = state.changePasswordForm;
+  if (form.newPassword !== form.confirmPassword) {
+    toast("รหัสผ่านใหม่ทั้งสองช่องไม่ตรงกัน");
+    return false;
+  }
+  try {
+    await api("/api/me/change-password", {
+      method: "POST",
+      body: JSON.stringify({ currentPassword: form.currentPassword, newPassword: form.newPassword }),
+    });
+    state.changePasswordForm = { currentPassword: "", newPassword: "", confirmPassword: "" };
+    toast("เปลี่ยนรหัสผ่านสำเร็จ");
+    return true;
+  } catch (error) {
+    toast(error.message);
+    return false;
+  }
+}
+
+async function logout() {
+  try {
+    await api("/api/logout", { method: "POST" });
+  } catch {
+    // even if the request fails, still clear local state below
+  }
   state.me = null;
-  state.admin = { users: [], products: [], topups: [], orders: [], stats: {} };
-  localStorage.removeItem("shopToken");
+  state.admin = { products: [], topups: [], orders: [], stats: {} };
+  state.adminUsers = { list: [], total: 0, page: 1, pageSize: 20, search: "" };
   setView("home");
   toast("ออกจากระบบแล้ว");
 }
@@ -271,10 +291,15 @@ async function deleteProduct(product) {
   const ok = confirm(`ต้องการลบสินค้า "${product.title}" ใช่หรือไม่`);
   if (!ok) return;
   try {
-    await api(`/api/admin/products/${product.id}`, { method: "DELETE" });
-    toast("ลบสินค้าแล้ว");
+    const data = await api(`/api/admin/products/${product.id}`, { method: "DELETE" });
+    if (data.deactivatedSpinPrizes?.length) {
+      toast(`ลบสินค้าแล้ว (ปิดของรางวัลกงล้อที่ผูกไว้อัตโนมัติ: ${data.deactivatedSpinPrizes.join(", ")})`);
+    } else {
+      toast("ลบสินค้าแล้ว");
+    }
     await loadBootstrap();
     await loadAdmin();
+    await loadAdminSpin();
   } catch (error) {
     toast(error.message);
   }
@@ -647,6 +672,7 @@ export function useShop() {
     requireLogin,
     login,
     register,
+    changePassword,
     logout,
     requestPurchase,
     cancelPurchase,

@@ -43,3 +43,28 @@ export function decrypt(payload) {
   const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
   return decrypted.toString("utf8");
 }
+
+// Password hashing (PBKDF2) — shared between login/register (index.js) and the
+// first-admin bootstrap (db.js) so there's exactly one implementation.
+export function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
+  const hash = crypto.pbkdf2Sync(password, salt, 100000, 32, "sha256").toString("hex");
+  return { salt, hash };
+}
+
+export function verifyPassword(password, user) {
+  const result = hashPassword(password, user.salt);
+  return crypto.timingSafeEqual(Buffer.from(result.hash, "hex"), Buffer.from(user.passwordHash, "hex"));
+}
+
+// Minimum password policy shared by register and change-password.
+export function passwordPolicyError(password) {
+  if (typeof password !== "string" || password.length < 8) {
+    return "รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร";
+  }
+  const hasLetter = /[a-zA-Zก-๙]/.test(password);
+  const hasNumber = /[0-9]/.test(password);
+  if (!hasLetter || !hasNumber) {
+    return "รหัสผ่านต้องมีทั้งตัวอักษรและตัวเลขอย่างน้อยอย่างละ 1 ตัว";
+  }
+  return null;
+}

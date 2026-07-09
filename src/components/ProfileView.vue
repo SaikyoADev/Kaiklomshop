@@ -30,6 +30,26 @@
           รับโค้ดได้จากแอดมินหรือกิจกรรมของร้าน โค้ดแต่ละอันใช้ได้ 1 ครั้งต่อบัญชี
         </p>
       </form>
+
+      <form class="panel form-card profile-full-row" @submit.prevent="shop.changePassword" novalidate>
+        <h2>เปลี่ยนรหัสผ่าน</h2>
+        <label>
+          รหัสผ่านปัจจุบัน
+          <input v-model="shop.state.changePasswordForm.currentPassword" type="password" autocomplete="current-password" required />
+        </label>
+        <label>
+          รหัสผ่านใหม่
+          <input v-model="shop.state.changePasswordForm.newPassword" type="password" autocomplete="new-password" required />
+        </label>
+        <label>
+          ยืนยันรหัสผ่านใหม่
+          <input v-model="shop.state.changePasswordForm.confirmPassword" type="password" autocomplete="new-password" required />
+        </label>
+        <p class="muted" style="font-size: 13px; margin: 0">
+          รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร และมีทั้งตัวอักษรและตัวเลข
+        </p>
+        <button class="solid" type="submit">เปลี่ยนรหัสผ่าน</button>
+      </form>
     </div>
 
     <div v-else class="panel">เข้าสู่ระบบเพื่อดูข้อมูลโปรไฟล์</div>
