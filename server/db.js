@@ -179,6 +179,27 @@ async function createSchema() {
         INDEX idx_spin_history_user (userId)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
+
+    // Simple key-value store for editable site content (hero images, bank info)
+    // so the admin can change these from the panel instead of editing source code.
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS site_settings (
+        \`key\` VARCHAR(64) PRIMARY KEY,
+        value TEXT
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    const defaultSettings = {
+      hero_image: "https://images.unsplash.com/photo-1612287230202-1ff1d85d1bdf?auto=format&fit=crop&w=1600&q=80",
+      hero_card_image: "",
+      bank_name: "ธนาคารกรุงไทย",
+      bank_account_name: "นายณัฐวุฒิ นิลทะราช",
+      bank_account_no: "660-****-***-***",
+      bank_line_note: "เมื่อมีเงินเข้า ให้เจ้าของร้านดูแจ้งเตือน LINE Krungthai แล้วนำเลขอ้างอิงมากดยืนยันในหลังบ้าน",
+    };
+    for (const [key, value] of Object.entries(defaultSettings)) {
+      await conn.query("INSERT IGNORE INTO site_settings (\`key\`, value) VALUES (?, ?)", [key, value]);
+    }
   } finally {
     conn.release();
   }

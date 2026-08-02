@@ -1,5 +1,5 @@
 <template>
-  <section class="hero">
+  <section class="hero" :style="heroStyle">
     <div class="hero-copy">
       <p class="eyebrow">ระบบซื้อขายไอดีเกมออนไลน์</p>
       <h1>Kaiklomshop</h1>
@@ -14,10 +14,13 @@
     </div>
 
     <div class="hero-art" aria-hidden="true">
-      <div class="game-card big">
-        <span>GAME ID</span>
-        <strong>ไอดีพร้อมเล่น</strong>
-        <small>สต็อกอัปเดตสด รับประกันทุกออเดอร์</small>
+      <div class="game-card big" :class="{ 'has-image': shop.state.heroCardImage }">
+        <img v-if="shop.state.heroCardImage" :src="shop.state.heroCardImage" alt="" class="game-card-image" />
+        <div class="game-card-content">
+          <span>GAME ID</span>
+          <strong>ไอดีพร้อมเล่น</strong>
+          <small>สต็อกอัปเดตสด รับประกันทุกออเดอร์</small>
+        </div>
       </div>
       <div class="floating-card one">Stock Live</div>
       <div class="floating-card two">Point Wallet</div>
@@ -26,6 +29,12 @@
 </template>
 
 <script setup>
+import { computed } from "vue";
 import { useShop } from "../composables/useShop";
 const shop = useShop();
+
+const heroStyle = computed(() => {
+  if (!shop.state.heroImage) return {};
+  return { "--hero-bg-image": `url("${shop.state.heroImage}")` };
+});
 </script>

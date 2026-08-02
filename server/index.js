@@ -8,6 +8,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { pool, initDb } from "./db.js";
 import { encrypt, decrypt, hashPassword, verifyPassword, passwordPolicyError } from "./crypto.js";
+import { notifyDiscordTopup } from "./discord.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = __dirname;
@@ -174,16 +175,36 @@ const generalLimiter = rateLimit({
 });
 app.use("/api", generalLimiter);
 
-// Strict limiter for login/register — the actual brute-force protection.
+// Strict-ish limiter for login/register — brute-force protection without being
+// annoying for legitimate users. Successful logins don't count against the
+// limit at all (skipSuccessfulRequests) — only repeated *failures* do, since
+// that's the actual brute-force signal.
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 10,
+  windowMs: 5 * 60 * 1000,
+  limit: 20,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { ok: false, message: "พยายามเข้าสู่ระบบถี่เกินไป กรุณารอสักครู่แล้วลองใหม่" },
+  skipSuccessfulRequests: true,
+  message: { ok: false, message: "พยายามเข้าสู่ระบบผิดถี่เกินไป กรุณารอสักครู่แล้วลองใหม่" },
 });
 
 const api = express.Router();
+
+async function getSiteSettings() {
+  const [rows] = await pool.query("SELECT `key`, value FROM site_settings");
+  const map = {};
+  for (const row of rows) map[row.key] = row.value;
+  return map;
+}
+
+async function updateSiteSettings(patch) {
+  for (const [key, value] of Object.entries(patch)) {
+    await pool.query(
+      "INSERT INTO site_settings (`key`, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)",
+      [key, value]
+    );
+  }
+}
 
 api.get("/bootstrap", async (req, res) => {
   const userId = getAuth(req);
@@ -193,19 +214,42 @@ api.get("/bootstrap", async (req, res) => {
   const products = await Promise.all(productRows.map(productWithStock));
   const [categoryRows] = await pool.query("SELECT DISTINCT category FROM products");
   const categories = categoryRows.map((r) => r.category);
+  const settings = await getSiteSettings();
 
   res.json({
     ok: true,
     me: publicUser(me),
     products,
     categories,
+    heroImage: settings.hero_image || "",
+    heroCardImage: settings.hero_card_image || "",
     bank: {
-      name: "ธนาคารกรุงไทย",
-      accountName: "นายณัฐวุฒิ นิลทะราช",
-      accountNo: "660-****-****",
-      lineNote: "เมื่อมีเงินเข้า ให้เจ้าของร้านดูแจ้งเตือน LINE Krungthai แล้วนำเลขอ้างอิงมากดยืนยันในหลังบ้าน",
+      name: settings.bank_name || "",
+      accountName: settings.bank_account_name || "",
+      accountNo: settings.bank_account_no || "",
+      lineNote: settings.bank_line_note || "",
     },
   });
+});
+
+api.get("/admin/site-settings", async (req, res) => {
+  const admin = await requireAdmin(req, res);
+  if (!admin) return;
+  const settings = await getSiteSettings();
+  res.json({ ok: true, settings });
+});
+
+api.patch("/admin/site-settings", async (req, res) => {
+  const admin = await requireAdmin(req, res);
+  if (!admin) return;
+  const allowedKeys = ["hero_image", "hero_card_image", "bank_name", "bank_account_name", "bank_account_no", "bank_line_note"];
+  const patch = {};
+  for (const key of allowedKeys) {
+    if (req.body[key] !== undefined) patch[key] = String(req.body[key]).trim();
+  }
+  await updateSiteSettings(patch);
+  const settings = await getSiteSettings();
+  res.json({ ok: true, settings });
 });
 
 api.post("/register", authLimiter, async (req, res) => {
@@ -340,6 +384,7 @@ api.post("/topups", async (req, res) => {
     "INSERT INTO topups (id, userId, amount, slipRef, transferAt, status, createdAt) VALUES (?,?,?,?,?,?,?)",
     [topup.id, topup.userId, topup.amount, topup.slipRef, topup.transferAt, topup.status, topup.createdAt]
   );
+  notifyDiscordTopup({ userName: user.name, username: user.username, amount, slipRef, transferAt });
   res.status(201).json({ ok: true, topup });
 });
 

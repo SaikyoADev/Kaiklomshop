@@ -11,6 +11,10 @@
       <AdminStats />
     </CollapsibleSection>
 
+    <CollapsibleSection title="ตั้งค่าหน้าแรก" :open="shop.state.adminPanelOpen.siteSettings" @toggle="shop.togglePanel('siteSettings')">
+      <AdminSiteSettings />
+    </CollapsibleSection>
+
     <CollapsibleSection title="เพิ่มสินค้าใหม่" :open="shop.state.adminPanelOpen.addProduct" @toggle="shop.togglePanel('addProduct')">
       <AdminProductForm />
     </CollapsibleSection>
@@ -45,6 +49,7 @@
 import { useShop } from "../composables/useShop";
 import CollapsibleSection from "./CollapsibleSection.vue";
 import AdminStats from "./admin/AdminStats.vue";
+import AdminSiteSettings from "./admin/AdminSiteSettings.vue";
 import AdminProductForm from "./admin/AdminProductForm.vue";
 import AdminStockForm from "./admin/AdminStockForm.vue";
 import AdminCodeManager from "./admin/AdminCodeManager.vue";

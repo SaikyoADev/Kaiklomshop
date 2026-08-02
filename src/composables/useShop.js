@@ -7,6 +7,8 @@ const state = reactive({
   categories: [],
   activeCategory: "ทั้งหมด",
   bank: null,
+  heroImage: "",
+  heroCardImage: "",
   view: "home",
   authTab: "login",
   toastMessage: "",
@@ -28,12 +30,14 @@ const state = reactive({
   spin: { costPerSpin: 0, prizes: [], spinning: false, lastResult: null },
   purchase: { pendingProduct: null, confirming: false },
   adminSpin: { prizes: [], costPerSpin: 0, prizeForm: { label: "", type: "points", pointsValue: "", productId: "", weight: 10, color: "#f59e0b" } },
+  adminSiteSettings: { hero_image: "", hero_card_image: "", bank_name: "", bank_account_name: "", bank_account_no: "", bank_line_note: "" },
   adminPanelOpen: {
     stats: true,
     addProduct: false,
     addStock: false,
     codes: false,
     spin: false,
+    siteSettings: false,
     topups: false,
     products: false,
     users: false,
@@ -87,6 +91,8 @@ async function loadBootstrap() {
     state.products = data.products;
     state.categories = data.categories;
     state.bank = data.bank;
+    state.heroImage = data.heroImage || "";
+    state.heroCardImage = data.heroCardImage || "";
   } catch (error) {
     toast(error.message);
   }
@@ -146,6 +152,7 @@ async function setView(view) {
     await loadAdminUsers();
     await loadAdminCodes();
     await loadAdminSpin();
+    await loadAdminSiteSettings();
   }
 }
 
@@ -570,6 +577,28 @@ function finishSpinAnimation() {
   state.spin.spinning = false;
 }
 
+// ---- Site settings (admin side) ----
+
+async function loadAdminSiteSettings() {
+  if (!isAdmin.value) return;
+  try {
+    const data = await api("/api/admin/site-settings");
+    state.adminSiteSettings = { ...state.adminSiteSettings, ...data.settings };
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function saveSiteSettings() {
+  try {
+    await api("/api/admin/site-settings", { method: "PATCH", body: JSON.stringify(state.adminSiteSettings) });
+    toast("บันทึกการตั้งค่าหน้าแรกแล้ว");
+    await loadBootstrap();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
 // ---- Spin wheel (admin side) ----
 
 async function loadAdminSpin() {
@@ -703,6 +732,8 @@ export function useShop() {
     updateSpinPrize,
     deleteSpinPrize,
     updateSpinCost,
+    loadAdminSiteSettings,
+    saveSiteSettings,
     togglePanel,
   };
 }
