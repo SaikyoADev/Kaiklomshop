@@ -10,7 +10,10 @@
     <SpinView :open-auth="openAuth" />
     <ProfileView />
     <AdminView />
+    <PrivacyPolicyView />
   </main>
+
+  <SiteFooter />
 
   <AuthDialog ref="authDialogRef" />
   <PurchaseConfirmDialog />
@@ -32,6 +35,8 @@ import OrdersView from "./components/OrdersView.vue";
 import SpinView from "./components/SpinView.vue";
 import ProfileView from "./components/ProfileView.vue";
 import AdminView from "./components/AdminView.vue";
+import PrivacyPolicyView from "./components/PrivacyPolicyView.vue";
+import SiteFooter from "./components/SiteFooter.vue";
 import AuthDialog from "./components/AuthDialog.vue";
 import PurchaseConfirmDialog from "./components/PurchaseConfirmDialog.vue";
 import MobileTabBar from "./components/MobileTabBar.vue";

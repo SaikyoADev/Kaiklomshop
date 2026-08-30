@@ -2100,8 +2100,9 @@ select option {
   }
 
   .mobile-tabbar .tab-icon {
-    font-size: 20px;
-    line-height: 1;
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
   }
 
   .mobile-tabbar button.active {
@@ -2192,4 +2193,47 @@ select option {
     flex-wrap: wrap;
     justify-content: flex-end;
   }
+}
+
+/* ---- Site footer ---- */
+.site-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 20px 16px 32px;
+  font-size: 13px;
+  color: var(--muted, #9a9a9a);
+  border-top: 1px solid var(--border);
+  margin-top: 24px;
+}
+
+.footer-link {
+  background: none;
+  border: none;
+  color: var(--muted, #9a9a9a);
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0;
+}
+.footer-link:hover {
+  color: var(--accent, #f59e0b);
+}
+
+@media (max-width: 640px) {
+  .site-footer {
+    padding-bottom: 100px; /* clear the fixed mobile tab bar */
+  }
+}
+
+.privacy-notice {
+  font-size: 12.5px;
+  color: var(--muted, #9a9a9a);
+  text-align: center;
+  margin: 4px 0 0;
+}
+.privacy-notice .footer-link {
+  font-size: 12.5px;
 }

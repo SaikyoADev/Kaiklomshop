@@ -15,7 +15,7 @@ export const pool = mysql.createPool({
   password: process.env.DB_PASSWORD || "shoppass123",
   database: process.env.DB_NAME || "kaiklomshop",
   waitForConnections: true,
-  connectionLimit: 10,
+  connectionLimit: 30,
   charset: "utf8mb4_unicode_ci",
 });
 
