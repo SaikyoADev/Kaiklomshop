@@ -1686,9 +1686,17 @@ main.page-ready {
 
 /* ─── Ripple on buttons ─── */
 .btn-ripple {
-  position: relative;
   overflow: hidden;
 }
+
+button.btn-ripple {
+  position: relative;
+}
+
+.chat-fab.btn-ripple {
+  position: fixed;
+}
+
 .ripple-wave {
   position: absolute;
   border-radius: 50%;
