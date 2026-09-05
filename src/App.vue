@@ -1,7 +1,20 @@
 <template>
+  <Transition name="loader">
+    <div v-if="!appReady" class="app-loader" role="status" aria-live="polite">
+      <div class="loader-card">
+        <div class="loader-logo">
+          <img src="/kaiklom-logo.png" alt="Kaiklomshop" />
+        </div>
+        <strong>Kaiklomshop</strong>
+        <span>กำลังโหลดร้านค้า...</span>
+        <div class="loader-bar" aria-hidden="true"></div>
+      </div>
+    </div>
+  </Transition>
+
   <TheHeader @open-auth="openAuth" />
 
-  <main>
+  <main :class="{ 'page-ready': appReady }">
     <HeroSection />
     <NoticeBanner />
     <HomeView @buy="(product) => shop.requestPurchase(product, openAuth)" />
@@ -45,12 +58,17 @@ import ChatFab from "./components/ChatFab.vue";
 
 const shop = useShop();
 const authDialogRef = ref(null);
+const appReady = ref(false);
 
 function openAuth(tab) {
-  authDialogRef.value.open(tab);
+  authDialogRef.value?.open(tab);
 }
 
-onMounted(() => {
-  shop.loadBootstrap();
+onMounted(async () => {
+  await Promise.all([
+    shop.loadBootstrap(),
+    new Promise((resolve) => setTimeout(resolve, 850)),
+  ]);
+  appReady.value = true;
 });
 </script>
