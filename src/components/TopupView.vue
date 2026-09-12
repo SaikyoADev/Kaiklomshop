@@ -8,16 +8,20 @@
     </div>
     <div class="split-layout">
       <div class="panel qr-panel">
-        <img src="/promptpay-qr.jpg" alt="PromptPay QR สำหรับโอนเงิน" class="qr-image" />
-        <h2>สแกนเพื่อโอนเงิน</h2>
-        <div class="bank-card" v-if="shop.state.bank">
-          <strong>{{ shop.state.bank.name }}</strong>
-          <span>ชื่อบัญชี: {{ shop.state.bank.accountName }}</span>
-          <span>เลขบัญชี: {{ shop.state.bank.accountNo }}</span>
-          <small>{{ shop.state.bank.lineNote }}</small>
+        <div class="topup-safe-card">
+          <span class="topup-safe-icon">!</span>
+          <h2>ปิดการแสดง QR เติมเงิน</h2>
+          <p>
+            เพื่อความปลอดภัย ระบบไม่แสดง QR Code ชื่อบัญชี หรือเลขบัญชีบนหน้าเว็บแล้ว
+          </p>
+        </div>
+        <div class="bank-card">
+          <strong>ติดต่อแอดมินก่อนเติมพอยต์</strong>
+          <span>กรุณาติดต่อผู้ดูแลระบบเพื่อรับช่องทางเติมพอยต์ที่ปลอดภัย</span>
+          <small>ข้อมูลบัญชีรับเงินถูกซ่อนจากหน้าลูกค้าแล้ว</small>
         </div>
         <p class="muted" style="font-size: 13px; margin: 0">
-          หลังโอนเงิน ให้กรอกยอดและเลขอ้างอิงสลิป ระบบจะสร้างรายการรอตรวจในหลังบ้าน
+          หากได้รับช่องทางเติมพอยต์จากแอดมินแล้ว ให้กรอกยอดและเลขอ้างอิงสลิป ระบบจะสร้างรายการรอตรวจในหลังบ้าน
         </p>
       </div>
 

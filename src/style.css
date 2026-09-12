@@ -995,6 +995,42 @@ select option {
   display: block;
 }
 
+.topup-safe-card {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+  text-align: center;
+  padding: 28px 20px;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--border-warm);
+  background: linear-gradient(145deg, rgba(212,148,58,0.12), rgba(255,255,255,0.03));
+  box-shadow: var(--shadow-md);
+}
+
+.topup-safe-icon {
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(212,148,58,0.16);
+  border: 1px solid var(--border-warm);
+  color: var(--accent);
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 900;
+}
+
+.topup-safe-card h2 {
+  margin: 0;
+}
+
+.topup-safe-card p {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
 .qr-box {
   width: min(100%, 280px);
   aspect-ratio: 1;

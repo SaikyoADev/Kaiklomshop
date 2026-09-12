@@ -192,10 +192,10 @@ async function createSchema() {
     const defaultSettings = {
       hero_image: "https://images.unsplash.com/photo-1612287230202-1ff1d85d1bdf?auto=format&fit=crop&w=1600&q=80",
       hero_card_image: "",
-      bank_name: "ธนาคารกรุงไทย",
-      bank_account_name: "นายณัฐวุฒิ นิลทะราช",
-      bank_account_no: "660-****-***-***",
-      bank_line_note: "เมื่อมีเงินเข้า ให้เจ้าของร้านดูแจ้งเตือน LINE Krungthai แล้วนำเลขอ้างอิงมากดยืนยันในหลังบ้าน",
+      bank_name: "",
+      bank_account_name: "",
+      bank_account_no: "",
+      bank_line_note: "ข้อมูลบัญชีรับเงินถูกซ่อนจากหน้าลูกค้าแล้ว หากต้องการเติมพอยต์ให้ติดต่อแอดมินก่อนทำรายการ",
     };
     for (const [key, value] of Object.entries(defaultSettings)) {
       await conn.query("INSERT IGNORE INTO site_settings (\`key\`, value) VALUES (?, ?)", [key, value]);

@@ -223,12 +223,7 @@ api.get("/bootstrap", async (req, res) => {
     categories,
     heroImage: settings.hero_image || "",
     heroCardImage: settings.hero_card_image || "",
-    bank: {
-      name: settings.bank_name || "",
-      accountName: settings.bank_account_name || "",
-      accountNo: settings.bank_account_no || "",
-      lineNote: settings.bank_line_note || "",
-    },
+    bank: null,
   });
 });
 
