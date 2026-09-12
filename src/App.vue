@@ -30,6 +30,20 @@
 
   <AuthDialog ref="authDialogRef" />
   <PurchaseConfirmDialog />
+  <Transition name="maintenance">
+    <div v-if="shop.siteClosedForUser.value && shop.state.maintenanceModalOpen" class="maintenance-overlay" role="dialog" aria-modal="true" aria-labelledby="maintenance-title">
+      <div class="maintenance-card">
+        <span class="maintenance-icon">!</span>
+        <p>Kaiklomshop</p>
+        <h2 id="maintenance-title">เว็บนี้ถูกปิดใช้งานแล้ว</h2>
+        <span>{{ shop.state.maintenance.reason || 'เว็บไซต์ถูกปิดใช้งานชั่วคราว กรุณาติดต่อแอดมินเพื่อสอบถามข้อมูลเพิ่มเติม' }}</span>
+        <div class="maintenance-actions">
+          <button class="solid" type="button" @click="openAuth('login')">เข้าสู่ระบบแอดมิน</button>
+          <button class="outline" type="button" @click="shop.state.maintenanceModalOpen = false">ปิดข้อความ</button>
+        </div>
+      </div>
+    </div>
+  </Transition>
   <ToastMessage />
   <MobileTabBar />
   <ChatFab />

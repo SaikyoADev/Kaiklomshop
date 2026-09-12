@@ -7,6 +7,8 @@ const state = reactive({
   categories: [],
   activeCategory: "ทั้งหมด",
   bank: null,
+  maintenance: { enabled: false, reason: "" },
+  maintenanceModalOpen: false,
   heroImage: "",
   heroCardImage: "",
   view: "home",
@@ -30,7 +32,16 @@ const state = reactive({
   spin: { costPerSpin: 0, prizes: [], spinning: false, lastResult: null },
   purchase: { pendingProduct: null, confirming: false },
   adminSpin: { prizes: [], costPerSpin: 0, prizeForm: { label: "", type: "points", pointsValue: "", productId: "", weight: 10, color: "#f59e0b" } },
-  adminSiteSettings: { hero_image: "", hero_card_image: "", bank_name: "", bank_account_name: "", bank_account_no: "", bank_line_note: "" },
+  adminSiteSettings: {
+    hero_image: "",
+    hero_card_image: "",
+    bank_name: "",
+    bank_account_name: "",
+    bank_account_no: "",
+    bank_line_note: "",
+    site_maintenance_enabled: "0",
+    site_maintenance_reason: "",
+  },
   adminPanelOpen: {
     stats: true,
     addProduct: false,
@@ -45,6 +56,7 @@ const state = reactive({
 });
 
 const isAdmin = computed(() => state.me?.role === "admin");
+const siteClosedForUser = computed(() => Boolean(state.maintenance.enabled && !isAdmin.value));
 const categoryFilters = computed(() => ["ทั้งหมด", ...state.categories]);
 const filteredProducts = computed(() => {
   if (state.activeCategory === "ทั้งหมด") return state.products;
@@ -68,6 +80,10 @@ function toast(message) {
   }, 3200);
 }
 
+function openMaintenanceNotice() {
+  state.maintenanceModalOpen = true;
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     ...options,
@@ -79,6 +95,10 @@ async function api(path, options = {}) {
   });
   const data = await response.json();
   if (!response.ok || data.ok === false) {
+    if (data.maintenance) {
+      state.maintenance = data.maintenance;
+      state.maintenanceModalOpen = Boolean(data.maintenance.enabled && !isAdmin.value);
+    }
     throw new Error(data.message || "เกิดข้อผิดพลาด");
   }
   return data;
@@ -91,6 +111,8 @@ async function loadBootstrap() {
     state.products = data.products;
     state.categories = data.categories;
     state.bank = data.bank;
+    state.maintenance = data.maintenance || { enabled: false, reason: "" };
+    state.maintenanceModalOpen = Boolean(state.maintenance.enabled && !isAdmin.value);
     state.heroImage = data.heroImage || "";
     state.heroCardImage = data.heroCardImage || "";
   } catch (error) {
@@ -142,6 +164,10 @@ async function loadAdmin() {
 }
 
 async function setView(view) {
+  if (siteClosedForUser.value && view !== "admin") {
+    openMaintenanceNotice();
+    return;
+  }
   state.view = view;
   window.scrollTo({ top: 0, behavior: "smooth" });
   if (view === "topup") await loadTopups();
@@ -157,6 +183,10 @@ async function setView(view) {
 }
 
 function requireLogin(openAuthFn) {
+  if (siteClosedForUser.value) {
+    openMaintenanceNotice();
+    return false;
+  }
   if (state.me) return true;
   openAuthFn("login");
   toast("กรุณาเข้าสู่ระบบก่อนใช้งาน");
@@ -176,6 +206,10 @@ async function login() {
 }
 
 async function register() {
+  if (siteClosedForUser.value) {
+    openMaintenanceNotice();
+    return false;
+  }
   try {
     const data = await api("/api/register", { method: "POST", body: JSON.stringify(state.registerForm) });
     state.me = data.user;
@@ -216,11 +250,21 @@ async function logout() {
   state.me = null;
   state.admin = { products: [], topups: [], orders: [], stats: {} };
   state.adminUsers = { list: [], total: 0, page: 1, pageSize: 20, search: "" };
+  if (siteClosedForUser.value) {
+    state.view = "home";
+    openMaintenanceNotice();
+    toast("ออกจากระบบแล้ว");
+    return;
+  }
   setView("home");
   toast("ออกจากระบบแล้ว");
 }
 
 function requestPurchase(product, openAuthFn) {
+  if (siteClosedForUser.value) {
+    openMaintenanceNotice();
+    return;
+  }
   if (!requireLogin(openAuthFn)) return;
   if (product.stock < 1) {
     toast("สินค้าหมดสต็อก");
@@ -465,6 +509,10 @@ async function deleteUser(user) {
 }
 
 async function redeemCode() {
+  if (siteClosedForUser.value) {
+    openMaintenanceNotice();
+    return;
+  }
   if (!state.me) {
     toast("กรุณาเข้าสู่ระบบก่อนใช้งาน");
     return;
@@ -553,6 +601,10 @@ async function loadSpin() {
 }
 
 async function spinWheel(openAuthFn) {
+  if (siteClosedForUser.value) {
+    openMaintenanceNotice();
+    return null;
+  }
   if (!requireLogin(openAuthFn)) return;
   if (state.spin.spinning) return;
   if (!state.me || state.me.points < state.spin.costPerSpin) {
@@ -594,6 +646,7 @@ async function saveSiteSettings() {
     await api("/api/admin/site-settings", { method: "PATCH", body: JSON.stringify(state.adminSiteSettings) });
     toast("บันทึกการตั้งค่าหน้าแรกแล้ว");
     await loadBootstrap();
+    await loadAdminSiteSettings();
   } catch (error) {
     toast(error.message);
   }
@@ -685,11 +738,13 @@ export function useShop() {
   return {
     state,
     isAdmin,
+    siteClosedForUser,
     categoryFilters,
     filteredProducts,
     baht,
     dateText,
     toast,
+    openMaintenanceNotice,
     loadBootstrap,
     loadTopups,
     loadOrders,

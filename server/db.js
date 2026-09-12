@@ -196,6 +196,8 @@ async function createSchema() {
       bank_account_name: "",
       bank_account_no: "",
       bank_line_note: "ข้อมูลบัญชีรับเงินถูกซ่อนจากหน้าลูกค้าแล้ว หากต้องการเติมพอยต์ให้ติดต่อแอดมินก่อนทำรายการ",
+      site_maintenance_enabled: "0",
+      site_maintenance_reason: "เว็บไซต์ถูกปิดใช้งานชั่วคราว กรุณาติดต่อแอดมินเพื่อสอบถามข้อมูลเพิ่มเติม",
     };
     for (const [key, value] of Object.entries(defaultSettings)) {
       await conn.query("INSERT IGNORE INTO site_settings (\`key\`, value) VALUES (?, ?)", [key, value]);

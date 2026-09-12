@@ -101,6 +101,26 @@ async function requireAdmin(req, res) {
   return user;
 }
 
+async function getMaintenanceStatus() {
+  const settings = await getSiteSettings();
+  return {
+    enabled: settings.site_maintenance_enabled === "1",
+    reason: settings.site_maintenance_reason || "เว็บไซต์ถูกปิดใช้งานชั่วคราว กรุณาติดต่อแอดมินเพื่อสอบถามข้อมูลเพิ่มเติม",
+  };
+}
+
+async function ensureSiteOpenForUser(res, user) {
+  if (user?.role === "admin") return true;
+  const maintenance = await getMaintenanceStatus();
+  if (!maintenance.enabled) return true;
+  res.status(503).json({
+    ok: false,
+    maintenance,
+    message: maintenance.reason || "เว็บไซต์ถูกปิดใช้งานชั่วคราว",
+  });
+  return false;
+}
+
 async function stockCountFor(productId) {
   const [[{ c }]] = await pool.query("SELECT COUNT(*) AS c FROM stock_items WHERE productId = ? AND sold = 0", [productId]);
   return c;
@@ -215,6 +235,7 @@ api.get("/bootstrap", async (req, res) => {
   const [categoryRows] = await pool.query("SELECT DISTINCT category FROM products");
   const categories = categoryRows.map((r) => r.category);
   const settings = await getSiteSettings();
+  const maintenance = await getMaintenanceStatus();
 
   res.json({
     ok: true,
@@ -224,6 +245,7 @@ api.get("/bootstrap", async (req, res) => {
     heroImage: settings.hero_image || "",
     heroCardImage: settings.hero_card_image || "",
     bank: null,
+    maintenance,
   });
 });
 
@@ -237,7 +259,16 @@ api.get("/admin/site-settings", async (req, res) => {
 api.patch("/admin/site-settings", async (req, res) => {
   const admin = await requireAdmin(req, res);
   if (!admin) return;
-  const allowedKeys = ["hero_image", "hero_card_image", "bank_name", "bank_account_name", "bank_account_no", "bank_line_note"];
+  const allowedKeys = [
+    "hero_image",
+    "hero_card_image",
+    "bank_name",
+    "bank_account_name",
+    "bank_account_no",
+    "bank_line_note",
+    "site_maintenance_enabled",
+    "site_maintenance_reason",
+  ];
   const patch = {};
   for (const key of allowedKeys) {
     if (req.body[key] !== undefined) patch[key] = String(req.body[key]).trim();
@@ -248,6 +279,8 @@ api.patch("/admin/site-settings", async (req, res) => {
 });
 
 api.post("/register", authLimiter, async (req, res) => {
+  const siteOpen = await ensureSiteOpenForUser(res, null);
+  if (!siteOpen) return;
   const name = String(req.body.name || "").trim();
   const username = String(req.body.username || "").trim().toLowerCase();
   const password = String(req.body.password || "");
@@ -300,6 +333,8 @@ api.post("/logout", async (req, res) => {
 api.post("/purchase", async (req, res) => {
   const user = await requireUser(req, res);
   if (!user) return;
+  const siteOpen = await ensureSiteOpenForUser(res, user);
+  if (!siteOpen) return;
 
   const conn = await pool.getConnection();
   try {
@@ -368,6 +403,8 @@ api.post("/purchase", async (req, res) => {
 api.post("/topups", async (req, res) => {
   const user = await requireUser(req, res);
   if (!user) return;
+  const siteOpen = await ensureSiteOpenForUser(res, user);
+  if (!siteOpen) return;
   const amount = Math.round(Number(req.body.amount || 0));
   const slipRef = String(req.body.slipRef || "").trim();
   const transferAt = String(req.body.transferAt || "").trim();
@@ -732,6 +769,8 @@ function generateCode() {
 api.post("/redeem", async (req, res) => {
   const user = await requireUser(req, res);
   if (!user) return;
+  const siteOpen = await ensureSiteOpenForUser(res, user);
+  if (!siteOpen) return;
   const code = String(req.body.code || "").trim().toUpperCase();
   if (!code) return res.status(400).json({ ok: false, message: "กรุณากรอกโค้ด" });
 
@@ -882,6 +921,8 @@ api.get("/spin", async (req, res) => {
 api.post("/spin", async (req, res) => {
   const user = await requireUser(req, res);
   if (!user) return;
+  const siteOpen = await ensureSiteOpenForUser(res, user);
+  if (!siteOpen) return;
 
   const conn = await pool.getConnection();
   try {

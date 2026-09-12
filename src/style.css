@@ -933,6 +933,25 @@ h1 {
   gap: 16px;
 }
 
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border-warm);
+  background: rgba(212,148,58,0.05);
+  color: var(--text-primary);
+  font-weight: 800;
+}
+
+.toggle-row input {
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
+  accent-color: var(--accent);
+}
+
 label {
   display: grid;
   gap: 6px;
@@ -1850,6 +1869,84 @@ main.page-ready {
 }
 .confirm-actions .solid { flex: 1; }
 .confirm-actions .outline { flex: 1; }
+
+/* ─── Maintenance notice ─── */
+.maintenance-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 420;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0,0,0,0.74);
+  backdrop-filter: blur(12px);
+}
+
+.maintenance-card {
+  width: min(460px, 100%);
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  text-align: center;
+  padding: 30px;
+  border-radius: var(--r-xl);
+  border: 1px solid var(--border-warm);
+  background:
+    radial-gradient(circle at top, rgba(212,148,58,0.16), transparent 46%),
+    var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.maintenance-icon {
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--border-warm);
+  background: rgba(212,148,58,0.14);
+  color: var(--accent);
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 900;
+}
+
+.maintenance-card p {
+  margin: 0;
+  color: var(--accent);
+  font-family: var(--font-display);
+  font-weight: 900;
+}
+
+.maintenance-card h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 26px;
+}
+
+.maintenance-card span:not(.maintenance-icon) {
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+.maintenance-actions {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.maintenance-enter-active,
+.maintenance-leave-active {
+  transition: opacity 0.22s ease;
+}
+
+.maintenance-enter-from,
+.maintenance-leave-to {
+  opacity: 0;
+}
 
 /* ─── Wallet bounce on update ─── */
 @keyframes walletBounce {
