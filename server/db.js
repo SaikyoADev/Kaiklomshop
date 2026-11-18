@@ -8,12 +8,16 @@ import { encrypt, hashPassword } from "./crypto.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const legacyJsonPath = path.join(__dirname, "database.legacy.json");
 
+const databaseUrl = process.env.DATABASE_URL;
+const remoteDatabase = databaseUrl ? new URL(databaseUrl) : null;
+
 export const pool = mysql.createPool({
-  host: process.env.DB_HOST || "127.0.0.1",
-  port: Number(process.env.DB_PORT || 3306),
-  user: process.env.DB_USER || "shopuser",
-  password: process.env.DB_PASSWORD || "shoppass123",
-  database: process.env.DB_NAME || "kaiklomshop",
+  host: remoteDatabase?.hostname || process.env.DB_HOST || "127.0.0.1",
+  port: Number(remoteDatabase?.port || process.env.DB_PORT || 3306),
+  user: remoteDatabase ? decodeURIComponent(remoteDatabase.username) : process.env.DB_USER || "shopuser",
+  password: remoteDatabase ? decodeURIComponent(remoteDatabase.password) : process.env.DB_PASSWORD || "shoppass123",
+  database: remoteDatabase ? decodeURIComponent(remoteDatabase.pathname.replace(/^\//, "")) : process.env.DB_NAME || "kaiklomshop",
+  ...((remoteDatabase || process.env.DB_SSL === "true") ? { ssl: { rejectUnauthorized: true, minVersion: "TLSv1.2" } } : {}),
   waitForConnections: true,
   connectionLimit: 30,
   charset: "utf8mb4_unicode_ci",

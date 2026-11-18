@@ -47,31 +47,22 @@ npm run dev
 
 ---
 
-## ส่วนที่ 2: เปิดใช้งานจริง — แนะนำ Railway (ง่ายสุดสำหรับเวลาจำกัด)
+## ส่วนที่ 2: Deploy ฟรีด้วย Render + TiDB Cloud
 
-ทำไมแนะนำ Railway: มี MySQL ให้ในตัว ไม่ต้องเช่า VPS แยก, HTTPS ให้ฟรีอัตโนมัติ, deploy จาก GitHub ได้ใน 2-3 คลิก, มีแพ็กเกจฟรี/ราคาถูกพอสำหรับโปรเจกต์จบ
+เว็บและ API รันบน Render ส่วนฐานข้อมูลใช้ TiDB Cloud Starter โหมด MySQL-compatible โดย Render จะอ่านการตั้งค่าจาก `render.yaml` อัตโนมัติ
 
 ### ขั้นตอน
-1. **สร้างบัญชี Railway** ที่ railway.app (ผูก GitHub ได้เลย)
-2. **Push โค้ดโปรเจกต์นี้ขึ้น GitHub** (repo ใหม่ private ก็ได้)
-   - **สำคัญ**: ก่อน push ให้แน่ใจว่า `.env` และ `server/database.legacy.json` ไม่ถูก commit ขึ้นไป (มีอยู่ใน `.gitignore` แล้ว) เพราะมีข้อมูลลูกค้าจริงอยู่ในนั้น
-3. ใน Railway กด **New Project → Deploy from GitHub repo** เลือก repo นี้
-4. กด **+ New → Database → MySQL** ในโปรเจกต์เดียวกัน Railway จะสร้าง MySQL ให้และโชว์ค่า connection (host, user, password, database) มาให้
-5. ไปที่ service ของแอป (ไม่ใช่ตัว MySQL) → แท็บ **Variables** ใส่:
-   - `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` → คัดลอกจากตัว MySQL ที่ Railway สร้างให้ (มักจะมีปุ่ม "Reference" ให้เชื่อมตรงได้เลยไม่ต้องพิมพ์เอง)
-   - `CREDENTIAL_KEY` → รันคำสั่งสร้างคีย์แบบเดียวกับด้านบน แล้ววางที่นี่
-   - `NODE_ENV` = `production`
-6. ตั้ง **Build Command**: `npm run build`
-   ตั้ง **Start Command**: `npm start`
-7. Railway จะ deploy ให้อัตโนมัติ เสร็จแล้วจะได้ URL ชั่วคราวแบบ `xxxx.up.railway.app` — เปิดดูได้เลยว่าใช้งานได้จริง
+1. สร้างฐานข้อมูล TiDB Cloud Starter แบบ **MySQL Compatible** และตั้ง spending limit เป็น `0` เพื่อใช้โควตาฟรี
+2. ใน TiDB กด **Connect** แล้วเลือกการเชื่อมต่อแบบ Public / General จากนั้นจด `Host`, `Port`, `User`, `Password` และ `Database` ไว้ให้ครบ (Starter ต้องใช้ TLS)
+3. อัปโหลดโปรเจกต์ขึ้น GitHub โดยใช้ repository แบบ Private ห้ามอัปโหลด `.env`, `node_modules`, `dist` หรือ `server/database.legacy.json`
+4. ใน Render เลือก **New → Blueprint** แล้วเชื่อม repository ที่อัปโหลดไว้ จากนั้น Render จะใช้ `render.yaml` ตั้งค่า build และ start command
+5. ใน Environment ของบริการ Render ใส่ `DB_HOST`, `DB_USER`, `DB_PASSWORD` และ `DB_NAME` จาก TiDB; `DB_PORT=4000` และ `DB_SSL=true` ตั้งไว้แล้วใน `render.yaml`
+6. ตั้ง `INITIAL_ADMIN_PASSWORD` เป็นรหัสผ่านที่เดายาก แล้วบันทึกและ deploy
+7. เปิด URL ที่ Render แสดง แล้วเข้าสู่ระบบด้วยชื่อผู้ใช้ `admin` และรหัสผ่านที่ตั้งไว้
 
-### ต่อโดเมนจริง (ถ้าอยากได้ชื่อของตัวเอง)
-1. ซื้อโดเมนจากที่ไหนก็ได้ที่ราคาถูกและง่าย เช่น **Cloudflare Registrar**, Namecheap, หรือผู้ให้บริการไทยอย่าง GoDaddy/Godaddy.co.th — โดเมน `.com` ราคาประมาณ 300-500 บาท/ปี
-2. ใน Railway → service ของแอป → แท็บ **Settings → Networking → Custom Domain** ใส่โดเมนที่ซื้อมา ระบบจะให้ค่า CNAME มา
-3. ไปที่หน้าจัดการ DNS ของโดเมน (ที่ Cloudflare/Namecheap) เพิ่ม CNAME record ตามที่ Railway บอก
-4. รอ 10-30 นาที โดเมนจะเริ่มใช้งานได้ และ Railway จะออก HTTPS ให้อัตโนมัติ (ไม่ต้องตั้งเอง)
+`CREDENTIAL_KEY` จะถูกสร้างอัตโนมัติจาก `render.yaml` ห้ามลบหรือเปลี่ยนหลังเริ่มมีข้อมูลสต็อก เพราะใช้ถอดรหัสบัญชีเกมที่เก็บไว้
 
-**ถ้าเวลาไม่พอจริงๆ** ใช้ URL ฟรีของ Railway (`xxxx.up.railway.app`) นำเสนอได้เลยโดยไม่ต้องซื้อโดเมนก็ได้ อาจารย์ดูที่ตัวระบบทำงานได้จริงมากกว่าชื่อโดเมน
+Render Free อาจพักเว็บเมื่อไม่มีผู้เข้าใช้งาน ส่วน TiDB Starter กำหนดให้ใช้ TLS ผ่าน public endpoint
 
 ---
 
